@@ -244,7 +244,7 @@ st.markdown(
 # ---------------------------------------------------------
 with st.sidebar:
     if os.path.exists("assets/background_wave.jpg"):
-        st.image("assets/background_wave.jpg", caption="Arte Origami • Dinâmica de Ondas", use_container_width=True)
+        st.image("assets/background_wave.jpg", caption="TP Oceanografia Física", use_container_width=True)
     st.markdown("### 🎓 Contexto Pedagógico")
     st.info(
         """
