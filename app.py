@@ -33,6 +33,7 @@ def get_base64_image(image_path):
     return None
 
 bg_base64 = get_base64_image("assets/background_wave.jpg")
+logo_base64 = get_base64_image("assets/logo.png") or get_base64_image("logo.png")
 bg_css = ""
 if bg_base64:
     bg_css = f"""
@@ -737,13 +738,24 @@ if ds is not None:
                 use_container_width=True,
             )
 
-# Rodapé
-st.markdown("---")
-st.markdown(
+# Rodapé com branding e "Powered by" encostado à direita
+logo_html = ""
+if logo_base64:
+    logo_html = f"""
+    <div style="display: flex; align-items: center; gap: 12px; margin-left: auto;">
+        <span style="color: #94a3b8; font-size: 0.82rem; font-weight: 600; letter-spacing: 0.04em;">Powered by</span>
+        <img src="data:image/png;base64,{logo_base64}" alt="Powered by" style="height: 38px; width: auto; object-fit: contain; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.35));" />
+    </div>
     """
-    <div style="text-align: center; color: #64748b; font-size: 0.8rem; padding: 10px 0;">
-        <strong>BlueData • OceanNC Studio</strong> • Concebido para Ensino e Investigação em Oceanografia Física & Biologia Marinha.<br>
-        Compatível com grelhas de modelos hidrodinâmicos e dados de satélite da União Europeia (Copernicus Marine).
+
+st.markdown(
+    f"""
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 22px 0 10px 0; border-top: 1px solid rgba(255, 255, 255, 0.1); margin-top: 40px; flex-wrap: wrap; gap: 16px;">
+        <div style="color: #64748b; font-size: 0.82rem; line-height: 1.5;">
+            <strong style="color: #94a3b8;">BlueData • OceanNC Studio</strong> • Concebido para Ensino e Investigação em Oceanografia Física & Biologia Marinha.<br>
+            Compatível com grelhas de modelos hidrodinâmicos e dados de satélite da União Europeia (Copernicus Marine).
+        </div>
+        {logo_html}
     </div>
 """,
     unsafe_allow_html=True,
