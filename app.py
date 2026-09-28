@@ -228,7 +228,7 @@ def get_dataset_summary(ds):
 st.markdown(
     """
     <div class="hero-container">
-        <div class="hero-badge">🌊 Oceanografia Física & Biologia Marinha</div>
+        <div class="hero-badge">🌊 Simplificando a vida aos meus alunos</div>
         <h1 class="hero-title">BlueData • OceanNC Studio</h1>
         <p class="hero-subtitle">
             Plataforma científica para inspeção, amostragem e conversão de dados oceânicos multidimensionais (NetCDF 3D/4D).
