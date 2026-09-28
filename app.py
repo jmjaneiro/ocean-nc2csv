@@ -37,6 +37,7 @@ logo_base64 = get_base64_image("assets/logo.png") or get_base64_image("logo.png"
 bg_css = ""
 if bg_base64:
     bg_css = f"""
+    <style>
     [data-testid="stAppViewContainer"] {{
         background: linear-gradient(rgba(11, 19, 41, 0.85), rgba(11, 19, 41, 0.92)), url("data:image/jpeg;base64,{bg_base64}");
         background-size: cover;
@@ -53,19 +54,18 @@ if bg_base64:
         backdrop-filter: blur(16px);
         border-right: 1px solid rgba(255, 255, 255, 0.08);
     }}
+    </style>
     """
+    st.markdown(bg_css, unsafe_allow_html=True)
 
-# Injeção de CSS Premium
-st.markdown(
-    f"""
+# Injeção de CSS Premium Estático (sem f-string para evitar conflitos com chavetas de CSS)
+static_css = """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
-    html, body, [class*="css"] {{
+    html, body, [class*="css"] {
         font-family: 'Plus Jakarta Sans', sans-serif;
-    }}
-
-    {bg_css}
+    }
 
     /* Hero Banner Premium */
     .hero-container {
@@ -194,9 +194,8 @@ st.markdown(
         font-family: 'JetBrains Mono', monospace;
     }
     </style>
-""",
-    unsafe_allow_html=True,
-)
+    """
+st.markdown(static_css, unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------
