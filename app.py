@@ -440,15 +440,41 @@ if ds is not None:
 
     with f_col1:
         st.markdown("##### 🧪 1. Parâmetros a Extrair")
-        selected_vars = st.multiselect(
-            "Selecione as variáveis para a tabela:",
-            options=data_vars,
-            default=data_vars,
-            format_func=lambda x: var_labels.get(x, x),
+        
+        var_dropdown_options = [
+            f"🌟 Todas as variáveis ({len(data_vars)} parâmetros)",
+            "✏️ Seleção personalizada (escolher múltiplas)",
+        ] + data_vars
+
+        param_choice = st.selectbox(
+            "Selecione o que pretende extrair no menu:",
+            options=var_dropdown_options,
+            format_func=lambda x: (
+                x if (x.startswith("🌟") or x.startswith("✏️"))
+                else f"{x} — {ds[x].attrs.get('long_name', x)}" + (f" ({ds[x].attrs.get('units', '')})" if ds[x].attrs.get("units") else "")
+            ),
+            index=0,
+            help="Escolha todas as variáveis ou selecione um parâmetro oceanográfico específico.",
         )
-        if not selected_vars:
-            st.warning("⚠️ Selecione pelo menos uma variável.")
-            st.stop()
+
+        if param_choice.startswith("🌟"):
+            selected_vars = data_vars
+            st.caption(f"✓ Serão extraídas todas as colunas: `{', '.join(data_vars)}`")
+        elif param_choice.startswith("✏️"):
+            selected_vars = []
+            cols_chk = st.columns(2)
+            for idx, v in enumerate(data_vars):
+                with cols_chk[idx % 2]:
+                    chk = st.checkbox(f"{v}", value=True, key=f"chk_var_{v}", help=ds[v].attrs.get('long_name', v))
+                    if chk:
+                        selected_vars.append(v)
+            if not selected_vars:
+                st.warning("⚠️ Selecione pelo menos uma variável.")
+                st.stop()
+        else:
+            selected_vars = [param_choice]
+            unit_info = f" ({ds[param_choice].attrs.get('units', '')})" if ds[param_choice].attrs.get("units") else ""
+            st.caption(f"✓ Extrair apenas: **{param_choice}**{unit_info}")
 
     with f_col2:
         st.markdown("##### 🌊 2. Dimensão Vertical (Profundidade)")
