@@ -4,6 +4,7 @@ Plataforma profissional de processamento e conversão de dados oceanográficos N
 Desenvolvida para investigação e ensino em Oceanografia Física & Biologia Marinha.
 """
 
+import base64
 import io
 import os
 import tempfile
@@ -24,15 +25,46 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+def get_base64_image(image_path):
+    """Carrega uma imagem local e devolve a string Base64."""
+    if os.path.exists(image_path):
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    return None
+
+bg_base64 = get_base64_image("assets/background_wave.jpg")
+bg_css = ""
+if bg_base64:
+    bg_css = f"""
+    [data-testid="stAppViewContainer"] {{
+        background: linear-gradient(rgba(11, 19, 41, 0.85), rgba(11, 19, 41, 0.92)), url("data:image/jpeg;base64,{bg_base64}");
+        background-size: cover;
+        background-position: center bottom;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+    }}
+    [data-testid="stHeader"] {{
+        background: rgba(11, 19, 41, 0.4);
+        backdrop-filter: blur(8px);
+    }}
+    [data-testid="stSidebar"] {{
+        background: rgba(15, 23, 42, 0.88);
+        backdrop-filter: blur(16px);
+        border-right: 1px solid rgba(255, 255, 255, 0.08);
+    }}
+    """
+
 # Injeção de CSS Premium
 st.markdown(
-    """
+    f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
-    html, body, [class*="css"] {
+    html, body, [class*="css"] {{
         font-family: 'Plus Jakarta Sans', sans-serif;
-    }
+    }}
+
+    {bg_css}
 
     /* Hero Banner Premium */
     .hero-container {
@@ -211,6 +243,8 @@ st.markdown(
 # 4. Barra Lateral (Sidebar) com Ajuda e Guia
 # ---------------------------------------------------------
 with st.sidebar:
+    if os.path.exists("assets/background_wave.jpg"):
+        st.image("assets/background_wave.jpg", caption="Arte Origami • Dinâmica de Ondas", use_container_width=True)
     st.markdown("### 🎓 Contexto Pedagógico")
     st.info(
         """
