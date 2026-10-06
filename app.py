@@ -275,8 +275,7 @@ col_up, col_sample = st.columns([3, 1])
 with col_up:
     uploaded_file = st.file_uploader(
         "Arraste ou selecione o ficheiro NetCDF (.nc, .nc4):",
-        type=["nc", "nc4", "netcdf"],
-        help="Suporta ficheiros Copernicus Marine Service, NOAA, NASA OBPG e modelos oceanográficos locais.",
+        help="Compatível com iPad, Mac e Windows. Suporta ficheiros Copernicus Marine Service, NOAA, NASA OBPG e modelos oceanográficos locais.",
     )
 
 with col_sample:
@@ -292,13 +291,17 @@ filename = ""
 
 if uploaded_file is not None:
     filename = uploaded_file.name
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".nc") as tmp_file:
+    # Garantir sufixo apropriado para os backends do xarray
+    suffix = ".nc4" if ".nc4" in filename.lower() else ".nc"
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
         tmp_file.write(uploaded_file.getvalue())
         tmp_path = tmp_file.name
     try:
         ds = xr.open_dataset(tmp_path)
     except Exception as e:
-        st.error(f"Erro ao abrir o ficheiro NetCDF: {e}")
+        st.error(f"⚠️ Não foi possível ler o ficheiro como NetCDF válido (**{filename}**).")
+        st.info("Certifique-se de que selecionou um ficheiro oceanográfico NetCDF (.nc ou .nc4) completo e não corrompido.")
     finally:
         try:
             os.remove(tmp_path)
