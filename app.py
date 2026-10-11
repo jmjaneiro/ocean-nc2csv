@@ -14,6 +14,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 import xarray as xr
+import folium
+from streamlit_folium import st_folium
 
 import geo_coords as gc
 
@@ -737,12 +739,18 @@ def render_netcdf_tab(preset_all_flag):
 def render_coords_tab():
     st.markdown('<div class="step-pill">🧭 Conversor de Coordenadas Geográficas</div>', unsafe_allow_html=True)
     st.markdown(
-        "Converta coordenadas geográficas entre **Graus Decimais (DD)**, **GPS Náutico (DMM)** e **Cartas Náuticas (DMS)**, "
-        "com indicação direta das componentes **N, S, E, W** e mapa batimétrico global com isolinhas de profundidade."
+        "Selecione um ponto diretamente no **mapa batimétrico com isolinhas de profundidade** para converter instantaneamente entre "
+        "**Graus Decimais (DD)**, **GPS Náutico (DMM)** e **Cartas Náuticas (DMS)** com indicação direta das componentes **N, S, E, W**."
     )
 
-    # Presets Didáticos
-    col_pre, _ = st.columns([2, 1])
+    # Inicializar coordenadas na sessão
+    if "coord_lat" not in st.session_state:
+        st.session_state["coord_lat"] = 37.0150
+    if "coord_lon" not in st.session_state:
+        st.session_state["coord_lon"] = -7.9350
+
+    # Barra de presets rápidos e indicador
+    col_pre, col_stat = st.columns([2, 1])
     with col_pre:
         preset_choice = st.selectbox(
             "⚓ Carregar Estação Oceanográfica Didática (Portugal & Regiões):",
@@ -750,128 +758,17 @@ def render_coords_tab():
             index=0,
             help="Carrega coordenadas de estações conhecidas da costa portuguesa, ilhas e montes submarinos.",
         )
+        if preset_choice != "Personalizado" and gc.PRESET_LOCATIONS.get(preset_choice) is not None:
+            p_lat, p_lon = gc.PRESET_LOCATIONS[preset_choice]
+            if abs(st.session_state["coord_lat"] - p_lat) > 1e-4 or abs(st.session_state["coord_lon"] - p_lon) > 1e-4:
+                st.session_state["coord_lat"] = p_lat
+                st.session_state["coord_lon"] = p_lon
+                st.rerun()
 
-    default_lat = 37.0150
-    default_lon = -7.9350
-    if preset_choice != "Personalizado" and gc.PRESET_LOCATIONS.get(preset_choice) is not None:
-        default_lat, default_lon = gc.PRESET_LOCATIONS[preset_choice]
+    curr_lat = float(st.session_state["coord_lat"])
+    curr_lon = float(st.session_state["coord_lon"])
 
-    # Modos de Entrada
-    mode_choice = st.radio(
-        "Formato de Entrada das Coordenadas:",
-        [
-            "1️⃣ Graus Decimais (DD com sinal: ex. 37.015, -7.935)",
-            "2️⃣ Componentes Cardinais (Graus Decimais com N/S e E/W)",
-            "3️⃣ GPS Náutico / Diário de Bordo (DMM - Graus e Minutos Decimais)",
-            "4️⃣ Cartografia / Cartas Náuticas (DMS - Graus, Minutos e Segundos)",
-            "📋 Colar Texto Livre (Smart Parser)",
-        ],
-        horizontal=True,
-    )
-
-    curr_lat = default_lat
-    curr_lon = default_lon
-
-    if "1️⃣" in mode_choice:
-        c1, c2 = st.columns(2)
-        with c1:
-            curr_lat = st.number_input(
-                "Latitude (ºN / ºS - valor decimal com sinal, negativo a Sul):",
-                value=float(default_lat),
-                step=0.001,
-                format="%.6f",
-                min_value=-90.0,
-                max_value=90.0,
-                key="coord_dd_lat",
-            )
-        with c2:
-            curr_lon = st.number_input(
-                "Longitude (ºE / ºW - valor decimal com sinal, negativo a Oeste):",
-                value=float(default_lon),
-                step=0.001,
-                format="%.6f",
-                min_value=-180.0,
-                max_value=180.0,
-                key="coord_dd_lon",
-            )
-
-    elif "2️⃣" in mode_choice:
-        c1, c2, c3, c4 = st.columns([3, 1, 3, 1])
-        with c1:
-            lat_abs = st.number_input("Latitude (valor absoluto):", value=float(abs(default_lat)), step=0.001, format="%.6f", min_value=0.0, max_value=90.0, key="card_lat_abs")
-        with c2:
-            lat_h = st.selectbox("Hemisfério Lat:", ["N", "S"], index=0 if default_lat >= 0 else 1, key="card_lat_h")
-        with c3:
-            lon_abs = st.number_input("Longitude (valor absoluto):", value=float(abs(default_lon)), step=0.001, format="%.6f", min_value=0.0, max_value=180.0, key="card_lon_abs")
-        with c4:
-            lon_h = st.selectbox("Hemisfério Lon:", ["W", "E"], index=0 if default_lon <= 0 else 1, key="card_lon_h")
-        curr_lat = lat_abs if lat_h == "N" else -lat_abs
-        curr_lon = lon_abs if lon_h == "E" else -lon_abs
-
-    elif "3️⃣" in mode_choice:
-        d_lat, m_lat, h_lat, _ = gc.dd_to_dmm(default_lat, True)
-        d_lon, m_lon, h_lon, _ = gc.dd_to_dmm(default_lon, False)
-        st.caption("Formato padrão dos aparelhos GPS a bordo das embarcações de investigação e rosetas CTD.")
-        c1, c2, c3 = st.columns([2, 3, 1])
-        with c1:
-            dmm_lat_deg = st.number_input("Lat Graus (º):", value=int(d_lat), min_value=0, max_value=90, step=1, key="dmm_lat_deg")
-        with c2:
-            dmm_lat_min = st.number_input("Lat Minutos Decimais ('):", value=float(m_lat), min_value=0.0, max_value=59.9999, step=0.1, format="%.4f", key="dmm_lat_min")
-        with c3:
-            dmm_lat_h = st.selectbox("Hemisfério Lat:", ["N", "S"], index=0 if h_lat == "N" else 1, key="dmm_lat_h")
-
-        c4, c5, c6 = st.columns([2, 3, 1])
-        with c4:
-            dmm_lon_deg = st.number_input("Lon Graus (º):", value=int(d_lon), min_value=0, max_value=180, step=1, key="dmm_lon_deg")
-        with c5:
-            dmm_lon_min = st.number_input("Lon Minutos Decimais ('):", value=float(m_lon), min_value=0.0, max_value=59.9999, step=0.1, format="%.4f", key="dmm_lon_min")
-        with c6:
-            dmm_lon_h = st.selectbox("Hemisfério Lon:", ["W", "E"], index=0 if h_lon == "W" else 1, key="dmm_lon_h")
-
-        curr_lat = gc.dmm_to_dd(dmm_lat_deg, dmm_lat_min, dmm_lat_h)
-        curr_lon = gc.dmm_to_dd(dmm_lon_deg, dmm_lon_min, dmm_lon_h)
-
-    elif "4️⃣" in mode_choice:
-        d_lat, m_lat, s_lat, h_lat, _ = gc.dd_to_dms(default_lat, True)
-        d_lon, m_lon, s_lon, h_lon, _ = gc.dd_to_dms(default_lon, False)
-        st.caption("Formato tradicional das cartas náuticas impressas (Graus, Minutos e Segundos).")
-        c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
-        with c1:
-            dms_lat_deg = st.number_input("Lat Graus (º):", value=int(d_lat), min_value=0, max_value=90, step=1, key="dms_lat_deg")
-        with c2:
-            dms_lat_min = st.number_input("Lat Minutos ('):", value=int(m_lat), min_value=0, max_value=59, step=1, key="dms_lat_min")
-        with c3:
-            dms_lat_sec = st.number_input('Lat Segundos ("):', value=float(s_lat), min_value=0.0, max_value=59.99, step=0.1, format="%.2f", key="dms_lat_sec")
-        with c4:
-            dms_lat_h = st.selectbox("Hemisfério Lat:", ["N", "S"], index=0 if h_lat == "N" else 1, key="dms_lat_h")
-
-        c5, c6, c7, c8 = st.columns([2, 2, 2, 1])
-        with c5:
-            dms_lon_deg = st.number_input("Lon Graus (º):", value=int(d_lon), min_value=0, max_value=180, step=1, key="dms_lon_deg")
-        with c6:
-            dms_lon_min = st.number_input("Lon Minutos ('):", value=int(m_lon), min_value=0, max_value=59, step=1, key="dms_lon_min")
-        with c7:
-            dms_lon_sec = st.number_input('Lon Segundos ("):', value=float(s_lon), min_value=0.0, max_value=59.99, step=0.1, format="%.2f", key="dms_lon_sec")
-        with c8:
-            dms_lon_h = st.selectbox("Hemisfério Lon:", ["W", "E"], index=0 if h_lon == "W" else 1, key="dms_lon_h")
-
-        curr_lat = gc.dms_to_dd(dms_lat_deg, dms_lat_min, dms_lat_sec, dms_lat_h)
-        curr_lon = gc.dms_to_dd(dms_lon_deg, dms_lon_min, dms_lon_sec, dms_lon_h)
-
-    elif "📋" in mode_choice:
-        raw_str = st.text_input(
-            "Cole aqui o texto com as coordenadas:",
-            value=f"{default_lat:.4f}, {default_lon:.4f}",
-            help="Aceita: '37.015, -7.935', '37.015 N, 7.935 W', '37° 00.900 N, 7° 56.100 W', '37° 00\\' 54\\\" N, 7° 56\\' 06\\\" W'",
-        )
-        parsed = gc.parse_coordinate_string(raw_str)
-        if parsed:
-            curr_lat, curr_lon = parsed
-            st.success(f"✓ Coordenadas identificadas com sucesso: Latitude = {curr_lat:.6f}, Longitude = {curr_lon:.6f}")
-        else:
-            st.error("Não foi possível interpretar este formato. Verifique se contém valores válidos de Latitude e Longitude.")
-
-    # Representações Finais
+    # Representações calculadas para rótulos
     _, _, _, _, dms_lat_str = gc.dd_to_dms(curr_lat, True)
     _, _, _, _, dms_lon_str = gc.dd_to_dms(curr_lon, False)
     _, _, _, dmm_lat_str = gc.dd_to_dmm(curr_lat, True)
@@ -879,8 +776,82 @@ def render_coords_tab():
     card_lat_str = gc.dd_to_cardinal(curr_lat, True)
     card_lon_str = gc.dd_to_cardinal(curr_lon, False)
 
+    with col_stat:
+        st.markdown(
+            f"""
+            <div style="background: rgba(14, 165, 233, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 10px; padding: 10px 14px; text-align: center; margin-top: 4px;">
+                <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Ponto Selecionado</div>
+                <div style="font-size: 0.98rem; color: #38bdf8; font-weight: 700; margin-top: 2px;">{card_lat_str}, {card_lon_str}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # ---------------------------------------------------------
+    # 1. MAPA BATIMÉTRICO GLOBAL INTERATIVO (POR CIMA DA CONVERSÃO)
+    # ---------------------------------------------------------
     st.markdown("---")
-    st.markdown("#### 📊 Tabela de Conversão Multi-Formato")
+    st.markdown("#### 🌊 Mapa Batimétrico Global (Clique no mapa para escolher o ponto)")
+    st.caption(
+        "Cartografia batimétrica de alta resolução (GEBCO / NOAA / ESRI Ocean Basemap) com relevo submarino sombreado, plataformas continentais, "
+        "fossas e **isolinhas de profundidade (isóbatas em metros)**. **Clique em qualquer zona do oceano para atualizar instantaneamente as coordenadas e conversões.**"
+    )
+
+    # Criar mapa Folium com camadas batimétricas
+    m = folium.Map(
+        location=[curr_lat, curr_lon],
+        zoom_start=7,
+        tiles=None,
+        control_scale=True,
+    )
+
+    # 1. Camada Base: Relevo Batimétrico Shaded Relief
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}",
+        attr="ESRI, GEBCO, NOAA",
+        name="Relevo Batimétrico Oceânico",
+        control=False,
+    ).add_to(m)
+
+    # 2. Camada de Sobreposição: Isolinhas de Profundidade e Toponímia
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}",
+        attr="ESRI Ocean Reference",
+        name="Isolinhas de Profundidade e Toponímia",
+        overlay=True,
+        control=False,
+    ).add_to(m)
+
+    # 3. Marcador da Estação Selecionada
+    folium.Marker(
+        [curr_lat, curr_lon],
+        tooltip=f"Ponto Selecionado: {card_lat_str}, {card_lon_str}",
+        popup=f"<b>Estação Oceanográfica:</b><br>{card_lat_str}, {card_lon_str}<br>DD: {curr_lat:.6f}, {curr_lon:.6f}",
+        icon=folium.Icon(color="red", icon="crosshairs", prefix="fa"),
+    ).add_to(m)
+
+    # Renderizar mapa interativo e capturar clique
+    map_data = st_folium(
+        m,
+        height=460,
+        width="100%",
+        returned_objects=["last_clicked"],
+        key=f"bathy_map_picker_{curr_lat:.4f}_{curr_lon:.4f}",
+    )
+
+    if map_data and map_data.get("last_clicked"):
+        clicked_lat = round(map_data["last_clicked"]["lat"], 6)
+        clicked_lon = round(map_data["last_clicked"]["lng"], 6)
+        if abs(clicked_lat - st.session_state["coord_lat"]) > 1e-4 or abs(clicked_lon - st.session_state["coord_lon"]) > 1e-4:
+            st.session_state["coord_lat"] = clicked_lat
+            st.session_state["coord_lon"] = clicked_lon
+            st.rerun()
+
+    # ---------------------------------------------------------
+    # 2. TABELA DE CONVERSÃO MULTI-FORMATO (POR BAIXO DO MAPA)
+    # ---------------------------------------------------------
+    st.markdown("---")
+    st.markdown("#### 📊 Tabela de Conversão Multi-Formato do Ponto Selecionado")
 
     c_c1, c_c2 = st.columns(2)
     with c_c1:
@@ -930,58 +901,101 @@ def render_coords_tab():
             unsafe_allow_html=True,
         )
 
-    # Mapa Batimétrico Global com Isolinhas de Profundidade
-    st.markdown("---")
-    st.markdown("#### 🌊 Mapa Batimétrico Global com Isolinhas de Profundidade")
-    st.caption(
-        "Cartografia batimétrica oceânica global de alta resolução (GEBCO / NOAA / ESRI Ocean Basemap) com relevo submarino sombreado, "
-        "plataformas continentais, fossas marinhas, montes submarinos e isolinhas batimétricas (isóbatas em metros com profundidades anotadas)."
-    )
-
-    fig_bathy = go.Figure()
-
-    fig_bathy.add_trace(
-        go.Scattermap(
-            lat=[curr_lat],
-            lon=[curr_lon],
-            mode="markers+text",
-            marker=dict(size=14, color="#ef4444"),
-            text=[f"📍 {card_lat_str}, {card_lon_str}"],
-            textposition="top right",
-            name="Ponto Selecionado",
-            hoverinfo="text",
-            hovertext=f"<b>Ponto Oceanográfico:</b><br>{card_lat_str}, {card_lon_str}<br>DD: {curr_lat:.6f}, {curr_lon:.6f}",
-        )
-    )
-
-    fig_bathy.update_layout(
-        map=dict(
-            style="white-bg",
-            layers=[
-                {
-                    "below": "traces",
-                    "sourcetype": "raster",
-                    "source": [
-                        "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}"
-                    ],
-                },
-                {
-                    "below": "traces",
-                    "sourcetype": "raster",
-                    "source": [
-                        "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}"
-                    ],
-                },
+    # ---------------------------------------------------------
+    # 3. OPÇÃO: AJUSTE MANUAL POR TECLADO
+    # ---------------------------------------------------------
+    with st.expander("✏️ Ajustar ou Inserir Coordenadas Manualmente (Teclado)"):
+        st.caption("Se tiver coordenadas exatas de um diário de bordo, artigo ou GPS, pode introduzi-las aqui:")
+        mode_choice = st.radio(
+            "Formato de Entrada Manual:",
+            [
+                "1️⃣ Graus Decimais (DD com sinal)",
+                "2️⃣ Componentes Cardinais (N/S e E/W)",
+                "3️⃣ GPS Náutico (DMM)",
+                "4️⃣ Cartas Náuticas (DMS)",
+                "📋 Colar Texto Livre (Smart Parser)",
             ],
-            center=dict(lat=curr_lat, lon=curr_lon),
-            zoom=7,
-        ),
-        margin=dict(l=0, r=0, t=10, b=0),
-        height=480,
-        showlegend=False,
-        template="plotly_dark",
-    )
-    st.plotly_chart(fig_bathy, use_container_width=True)
+            horizontal=True,
+        )
+
+        new_lat = curr_lat
+        new_lon = curr_lon
+
+        if "1️⃣" in mode_choice:
+            m1, m2 = st.columns(2)
+            with m1:
+                new_lat = st.number_input("Latitude (DD):", value=float(curr_lat), step=0.001, format="%.6f", min_value=-90.0, max_value=90.0, key="man_dd_lat")
+            with m2:
+                new_lon = st.number_input("Longitude (DD):", value=float(curr_lon), step=0.001, format="%.6f", min_value=-180.0, max_value=180.0, key="man_dd_lon")
+
+        elif "2️⃣" in mode_choice:
+            m1, m2, m3, m4 = st.columns([3, 1, 3, 1])
+            with m1:
+                lat_abs = st.number_input("Latitude:", value=float(abs(curr_lat)), step=0.001, format="%.6f", min_value=0.0, max_value=90.0, key="man_card_lat")
+            with m2:
+                lat_h = st.selectbox("Hemi:", ["N", "S"], index=0 if curr_lat >= 0 else 1, key="man_lh")
+            with m3:
+                lon_abs = st.number_input("Longitude:", value=float(abs(curr_lon)), step=0.001, format="%.6f", min_value=0.0, max_value=180.0, key="man_card_lon")
+            with m4:
+                lon_h = st.selectbox("Hemi:", ["W", "E"], index=0 if curr_lon <= 0 else 1, key="man_loh")
+            new_lat = lat_abs if lat_h == "N" else -lat_abs
+            new_lon = lon_abs if lon_h == "E" else -lon_abs
+
+        elif "3️⃣" in mode_choice:
+            d_l, m_l, h_l, _ = gc.dd_to_dmm(curr_lat, True)
+            d_lo, m_lo, h_lo, _ = gc.dd_to_dmm(curr_lon, False)
+            m1, m2, m3 = st.columns([2, 3, 1])
+            with m1:
+                dmm_l_d = st.number_input("Lat Graus:", value=int(d_l), min_value=0, max_value=90, step=1, key="man_dmm_ld")
+            with m2:
+                dmm_l_m = st.number_input("Lat Minutos:", value=float(m_l), min_value=0.0, max_value=59.9999, step=0.1, format="%.4f", key="man_dmm_lm")
+            with m3:
+                dmm_l_h = st.selectbox("Hemi:", ["N", "S"], index=0 if h_l == "N" else 1, key="man_dmm_lh")
+            m4, m5, m6 = st.columns([2, 3, 1])
+            with m4:
+                dmm_lo_d = st.number_input("Lon Graus:", value=int(d_lo), min_value=0, max_value=180, step=1, key="man_dmm_lod")
+            with m5:
+                dmm_lo_m = st.number_input("Lon Minutos:", value=float(m_lo), min_value=0.0, max_value=59.9999, step=0.1, format="%.4f", key="man_dmm_lom")
+            with m6:
+                dmm_lo_h = st.selectbox("Hemi:", ["W", "E"], index=0 if h_lo == "W" else 1, key="man_dmm_loh")
+            new_lat = gc.dmm_to_dd(dmm_l_d, dmm_l_m, dmm_l_h)
+            new_lon = gc.dmm_to_dd(dmm_lo_d, dmm_lo_m, dmm_lo_h)
+
+        elif "4️⃣" in mode_choice:
+            d_l, m_l, s_l, h_l, _ = gc.dd_to_dms(curr_lat, True)
+            d_lo, m_lo, s_lo, h_lo, _ = gc.dd_to_dms(curr_lon, False)
+            m1, m2, m3, m4 = st.columns([2, 2, 2, 1])
+            with m1:
+                dms_l_d = st.number_input("Lat º:", value=int(d_l), min_value=0, max_value=90, step=1, key="man_dms_ld")
+            with m2:
+                dms_l_m = st.number_input("Lat ':", value=int(m_l), min_value=0, max_value=59, step=1, key="man_dms_lm")
+            with m3:
+                dms_l_s = st.number_input('Lat ":', value=float(s_l), min_value=0.0, max_value=59.99, step=0.1, format="%.2f", key="man_dms_ls")
+            with m4:
+                dms_l_h = st.selectbox("Hemi:", ["N", "S"], index=0 if h_l == "N" else 1, key="man_dms_lh")
+            m5, m6, m7, m8 = st.columns([2, 2, 2, 1])
+            with m5:
+                dms_lo_d = st.number_input("Lon º:", value=int(d_lo), min_value=0, max_value=180, step=1, key="man_dms_lod")
+            with m6:
+                dms_lo_m = st.number_input("Lon ':", value=int(m_lo), min_value=0, max_value=59, step=1, key="man_dms_lom")
+            with m7:
+                dms_lo_s = st.number_input('Lon ":', value=float(s_lo), min_value=0.0, max_value=59.99, step=0.1, format="%.2f", key="man_dms_los")
+            with m8:
+                dms_lo_h = st.selectbox("Hemi:", ["W", "E"], index=0 if h_lo == "W" else 1, key="man_dms_loh")
+            new_lat = gc.dms_to_dd(dms_l_d, dms_l_m, dms_l_s, dms_l_h)
+            new_lon = gc.dms_to_dd(dms_lo_d, dms_lo_m, dms_lo_s, dms_lo_h)
+
+        elif "📋" in mode_choice:
+            raw_val = st.text_input("Cole aqui o texto com coordenadas:", value=f"{curr_lat:.4f}, {curr_lon:.4f}", key="man_paste_str")
+            parsed_val = gc.parse_coordinate_string(raw_val)
+            if parsed_val:
+                new_lat, new_lon = parsed_val
+                st.success(f"✓ Identificado: {new_lat:.6f}, {new_lon:.6f}")
+
+        if st.button("📍 Atualizar Ponto no Mapa", use_container_width=True):
+            st.session_state["coord_lat"] = round(new_lat, 6)
+            st.session_state["coord_lon"] = round(new_lon, 6)
+            st.rerun()
 
 
 # ---------------------------------------------------------
