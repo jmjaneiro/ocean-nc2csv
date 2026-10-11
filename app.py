@@ -522,32 +522,17 @@ def render_netcdf_tab(preset_all_flag):
                 all_lats = ds[lat_dim].values
                 all_lons = ds[lon_dim].values
 
-                synced_box = st.session_state.get("synced_cmems_box")
-                if synced_box:
-                    st.info(
-                        f"💡 Coordenadas da Calculadora CMEMS disponíveis: "
-                        f"Lat [{synced_box['min_lat']}, {synced_box['max_lat']}] | Lon [{synced_box['min_lon']}, {synced_box['max_lon']}]."
-                    )
-                    if st.button("Usar Coordenadas da Calculadora CMEMS", key="btn_apply_synced_coords"):
-                        st.session_state["use_synced_coords"] = True
-
-                use_synced = st.session_state.get("use_synced_coords", False)
-                def_lat_min = float(synced_box["min_lat"]) if (synced_box and use_synced) else float(np.min(all_lats))
-                def_lat_max = float(synced_box["max_lat"]) if (synced_box and use_synced) else float(np.max(all_lats))
-                def_lon_min = float(synced_box["min_lon"]) if (synced_box and use_synced) else float(np.min(all_lons))
-                def_lon_max = float(synced_box["max_lon"]) if (synced_box and use_synced) else float(np.max(all_lons))
-
                 c_l1, c_l2 = st.columns(2)
                 with c_l1:
-                    crop_lat_min = st.number_input("Lat Mín (ºN)", value=def_lat_min, step=0.1, format="%.2f", key="inp_c_lat_min")
+                    crop_lat_min = st.number_input("Lat Mín (ºN)", value=float(np.min(all_lats)), step=0.1, format="%.2f", key="inp_c_lat_min")
                 with c_l2:
-                    crop_lat_max = st.number_input("Lat Máx (ºN)", value=def_lat_max, step=0.1, format="%.2f", key="inp_c_lat_max")
+                    crop_lat_max = st.number_input("Lat Máx (ºN)", value=float(np.max(all_lats)), step=0.1, format="%.2f", key="inp_c_lat_max")
 
                 c_lo1, c_lo2 = st.columns(2)
                 with c_lo1:
-                    crop_lon_min = st.number_input("Lon Mín (ºE/W)", value=def_lon_min, step=0.1, format="%.2f", key="inp_c_lon_min")
+                    crop_lon_min = st.number_input("Lon Mín (ºE/W)", value=float(np.min(all_lons)), step=0.1, format="%.2f", key="inp_c_lon_min")
                 with c_lo2:
-                    crop_lon_max = st.number_input("Lon Máx (ºE/W)", value=def_lon_max, step=0.1, format="%.2f", key="inp_c_lon_max")
+                    crop_lon_max = st.number_input("Lon Máx (ºE/W)", value=float(np.max(all_lons)), step=0.1, format="%.2f", key="inp_c_lon_max")
             elif enable_crop:
                 st.caption("Coordenadas espaciais não identificadas para recorte.")
 
@@ -750,10 +735,10 @@ def render_netcdf_tab(preset_all_flag):
 # 6. MÓDULO 2: Calculadora de Coordenadas & CMEMS
 # ---------------------------------------------------------
 def render_coords_tab():
-    st.markdown('<div class="step-pill">🧭 Calculadora de Coordenadas & CMEMS</div>', unsafe_allow_html=True)
+    st.markdown('<div class="step-pill">🧭 Conversor de Coordenadas Geográficas</div>', unsafe_allow_html=True)
     st.markdown(
         "Converta coordenadas geográficas entre **Graus Decimais (DD)**, **GPS Náutico (DMM)** e **Cartas Náuticas (DMS)**, "
-        "com visualização direta das componentes **N, S, E, W** e código pronto para descarregar pontos no **Copernicus Marine (CMEMS)**."
+        "com indicação direta das componentes **N, S, E, W** e mapa batimétrico global com isolinhas de profundidade."
     )
 
     # Presets Didáticos
@@ -893,162 +878,110 @@ def render_coords_tab():
     _, _, _, dmm_lon_str = gc.dd_to_dmm(curr_lon, False)
     card_lat_str = gc.dd_to_cardinal(curr_lat, True)
     card_lon_str = gc.dd_to_cardinal(curr_lon, False)
-    lon_360_val = gc.lon_to_360(curr_lon)
 
     st.markdown("---")
     st.markdown("#### 📊 Tabela de Conversão Multi-Formato")
 
-    r1, r2, r3 = st.columns(3)
-    with r1:
+    c_c1, c_c2 = st.columns(2)
+    with c_c1:
         st.markdown(
             f"""
             <div class="kpi-card">
                 <div class="kpi-label">Componentes Cardinais (N S E W)</div>
-                <div class="kpi-value" style="font-size: 1.15rem; color: #38bdf8;">{card_lat_str}<br>{card_lon_str}</div>
-                <div class="kpi-desc">Notação formal de oceanografia e navegação</div>
+                <div class="kpi-value" style="font-size: 1.22rem; color: #38bdf8;">{card_lat_str}<br>{card_lon_str}</div>
+                <div class="kpi-desc">Notação formal de oceanografia (direto para estações CMEMS, bóias e cruzeiros)</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-    with r2:
+    with c_c2:
         st.markdown(
             f"""
             <div class="kpi-card">
                 <div class="kpi-label">Graus Decimais (DD com sinal)</div>
-                <div class="kpi-value" style="font-size: 1.15rem; color: #34d399;">Lat: {curr_lat:.6f}<br>Lon: {curr_lon:.6f}</div>
-                <div class="kpi-desc">Padrão numérico Python, R, QGIS e Excel</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with r3:
-        st.markdown(
-            f"""
-            <div class="kpi-card">
-                <div class="kpi-label">GPS Náutico / CTD (DMM)</div>
-                <div class="kpi-value" style="font-size: 1.15rem; color: #f59e0b;">{dmm_lat_str}<br>{dmm_lon_str}</div>
-                <div class="kpi-desc">Graus e minutos decimais de diário de bordo</div>
+                <div class="kpi-value" style="font-size: 1.22rem; color: #34d399;">Lat: {curr_lat:.6f}<br>Lon: {curr_lon:.6f}</div>
+                <div class="kpi-desc">Padrão numérico computacional (Python, R, QGIS, Excel e GIS)</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-    r4, r5 = st.columns(2)
-    with r4:
+    c_c3, c_c4 = st.columns(2)
+    with c_c3:
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+                <div class="kpi-label">GPS Náutico / Diário de Bordo (DMM)</div>
+                <div class="kpi-value" style="font-size: 1.2rem; color: #f59e0b;">{dmm_lat_str}<br>{dmm_lon_str}</div>
+                <div class="kpi-desc">Graus e minutos decimais habitual a bordo e em rosetas CTD</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with c_c4:
         st.markdown(
             f"""
             <div class="kpi-card">
                 <div class="kpi-label">Cartas Náuticas (DMS)</div>
-                <div class="kpi-value" style="font-size: 1.1rem; color: #a78bfa;">{dms_lat_str}<br>{dms_lon_str}</div>
-                <div class="kpi-desc">Graus, minutos e segundos (cartografia tradicional)</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with r5:
-        st.markdown(
-            f"""
-            <div class="kpi-card">
-                <div class="kpi-label">Longitude Grelha Global [0º a 360º]</div>
-                <div class="kpi-value" style="font-size: 1.1rem; color: #38bdf8;">Lon: {lon_360_val:.6f}º E</div>
-                <div class="kpi-desc">Grelha contínua usada em modelos CMEMS (NEMO)</div>
+                <div class="kpi-value" style="font-size: 1.2rem; color: #a78bfa;">{dms_lat_str}<br>{dms_lon_str}</div>
+                <div class="kpi-desc">Graus, minutos e segundos (cartografia náutica impressa)</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-    # Copernicus Marine (CMEMS)
+    # Mapa Batimétrico Global com Isolinhas de Profundidade
     st.markdown("---")
-    st.markdown("#### 🇪🇺 Utilização Direta no Copernicus Marine (CMEMS)")
-    st.info(
-        "No portal **Copernicus Marine** (MyOcean Viewer ou Subsetter), pode pesquisar dados para um **Ponto de Estação Único** "
-        "ou descarregar uma **Caixa Envolvente (*Bounding Box*)** com uma margem de segurança ao redor do ponto."
+    st.markdown("#### 🌊 Mapa Batimétrico Global com Isolinhas de Profundidade")
+    st.caption(
+        "Cartografia batimétrica oceânica global de alta resolução (GEBCO / NOAA / ESRI Ocean Basemap) com relevo submarino sombreado, "
+        "plataformas continentais, fossas marinhas, montes submarinos e isolinhas batimétricas (isóbatas em metros com profundidades anotadas)."
     )
 
-    cm_c1, cm_c2 = st.columns([1, 1])
-    with cm_c1:
-        st.markdown("##### 📍 Ponto de Estação Único")
-        st.markdown(f"**Latitude:** `{curr_lat:.4f}` ({card_lat_str})  \n**Longitude:** `{curr_lon:.4f}` ({card_lon_str})")
-        st.code(f"{curr_lat:.4f}, {curr_lon:.4f}", language="text")
+    fig_bathy = go.Figure()
 
-        st.markdown("##### 🔲 Caixa Envolvente (Bounding Box)")
-        buf_deg = st.slider(
-            "Margem de segurança ao redor do ponto (º):",
-            min_value=0.0,
-            max_value=0.5,
-            value=0.1,
-            step=0.05,
-            help="0.1º corresponde a ~11 km. Permite apanhar os nós de grelha oceânica vizinhos para calcular interpolações sem apanhar terra.",
-        )
-        box_cmems = gc.get_cmems_box(curr_lat, curr_lon, buf_deg)
-
-        b1, b2 = st.columns(2)
-        with b1:
-            st.metric("Latitude Sul (Mín)", f"{box_cmems['min_lat']:.4f}º")
-            st.metric("Longitude Oeste (Mín)", f"{box_cmems['min_lon']:.4f}º")
-        with b2:
-            st.metric("Latitude Norte (Máx)", f"{box_cmems['max_lat']:.4f}º")
-            st.metric("Longitude Este (Máx)", f"{box_cmems['max_lon']:.4f}º")
-
-        if st.button("📥 Enviar estas coordenadas para o Recorte Espacial do NetCDF", use_container_width=True):
-            st.session_state["synced_cmems_box"] = box_cmems
-            st.success("✓ Coordenadas sincronizadas! Estão prontas para usar no separador 'Conversor NetCDF → CSV' (Passo 3: Recorte Espacial).")
-
-    with cm_c2:
-        st.markdown("##### 💻 Código e Comandos CMEMS Prontos a Copiar")
-        tab_cli, tab_py = st.tabs(["Linha de Comandos (CLI)", "Código Python (copernicusmarine)"])
-        with tab_cli:
-            st.code(box_cmems["cli_cmd"], language="bash")
-        with tab_py:
-            st.code(box_cmems["python_snippet"], language="python")
-
-    # Mini-Mapa Interativo
-    st.markdown("---")
-    st.markdown("#### 🗺️ Localização Geográfica no Mapa Interativo")
-
-    fig_map = go.Figure()
-
-    if buf_deg > 0:
-        box_lats = [box_cmems["min_lat"], box_cmems["max_lat"], box_cmems["max_lat"], box_cmems["min_lat"], box_cmems["min_lat"]]
-        box_lons = [box_cmems["min_lon"], box_cmems["min_lon"], box_cmems["max_lon"], box_cmems["max_lon"], box_cmems["min_lon"]]
-        fig_map.add_trace(
-            go.Scattermap(
-                lat=box_lats,
-                lon=box_lons,
-                mode="lines",
-                line=dict(width=2, color="#0ea5e9"),
-                fill="toself",
-                fillcolor="rgba(14, 165, 233, 0.15)",
-                name=f"Área CMEMS (±{buf_deg}º)",
-                hoverinfo="text",
-                text=f"Bounding Box CMEMS (±{buf_deg}º)",
-            )
-        )
-
-    fig_map.add_trace(
+    fig_bathy.add_trace(
         go.Scattermap(
             lat=[curr_lat],
             lon=[curr_lon],
             mode="markers+text",
             marker=dict(size=14, color="#ef4444"),
-            text=[f"Estação: {card_lat_str}, {card_lon_str}"],
+            text=[f"📍 {card_lat_str}, {card_lon_str}"],
             textposition="top right",
             name="Ponto Selecionado",
+            hoverinfo="text",
+            hovertext=f"<b>Ponto Oceanográfico:</b><br>{card_lat_str}, {card_lon_str}<br>DD: {curr_lat:.6f}, {curr_lon:.6f}",
         )
     )
 
-    fig_map.update_layout(
+    fig_bathy.update_layout(
         map=dict(
-            style="open-street-map",
+            style="white-bg",
+            layers=[
+                {
+                    "below": "traces",
+                    "sourcetype": "raster",
+                    "source": [
+                        "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}"
+                    ],
+                },
+                {
+                    "below": "traces",
+                    "sourcetype": "raster",
+                    "source": [
+                        "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}"
+                    ],
+                },
+            ],
             center=dict(lat=curr_lat, lon=curr_lon),
-            zoom=8 if buf_deg <= 0.2 else 6,
+            zoom=7,
         ),
         margin=dict(l=0, r=0, t=10, b=0),
-        height=380,
-        showlegend=True,
+        height=480,
+        showlegend=False,
         template="plotly_dark",
     )
-    st.plotly_chart(fig_map, use_container_width=True)
+    st.plotly_chart(fig_bathy, use_container_width=True)
 
 
 # ---------------------------------------------------------
@@ -1056,7 +989,7 @@ def render_coords_tab():
 # ---------------------------------------------------------
 tab_converter, tab_coords = st.tabs([
     "🌊 Conversor NetCDF → CSV",
-    "🧭 Calculadora de Coordenadas & CMEMS",
+    "🧭 Conversor de Coordenadas",
 ])
 
 with tab_converter:

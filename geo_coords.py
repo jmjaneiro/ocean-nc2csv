@@ -1,6 +1,5 @@
 """
-Módulo de Conversão de Coordenadas Geográficas e Integração CMEMS (Copernicus Marine).
-Apoio a Oceanografia Física e Biologia Marinha.
+Módulo de Conversão de Coordenadas Geográficas para Oceanografia Física e Biologia Marinha.
 """
 
 import math
@@ -15,7 +14,6 @@ def dd_to_dms(val: float, is_lat: bool = True):
     m_full = (abs_v - d) * 60
     m = int(m_full)
     s = (m_full - m) * 60
-    # Evitar arredondamento que leve a 60 segundos
     if round(s, 2) >= 60.0:
         s = 0.0
         m += 1
@@ -40,7 +38,7 @@ def dd_to_dmm(val: float, is_lat: bool = True):
 
 
 def dd_to_cardinal(val: float, is_lat: bool = True, decimals: int = 6):
-    """Devolve a representação cardinal (ex: 37.015000° N ou 7.935000° W)."""
+    """Devolve a representação cardinal com componentes N S E W (ex: 37.015000° N ou 7.935000° W)."""
     hemi = ("N" if val >= 0 else "S") if is_lat else ("E" if val >= 0 else "W")
     return f"{abs(val):.{decimals}f}° {hemi}"
 
@@ -55,11 +53,6 @@ def dmm_to_dd(d: int, m: float, hemi: str) -> float:
     """Converte DMM para Graus Decimais (DD com sinal)."""
     dd = float(d) + float(m) / 60.0
     return -dd if hemi.upper() in ["S", "W"] else dd
-
-
-def lon_to_360(lon: float) -> float:
-    """Converte longitude [-180, 180] para grelha global [0, 360]."""
-    return (lon + 360.0) % 360.0
 
 
 def parse_coordinate_string(text: str):
@@ -151,41 +144,3 @@ PRESET_LOCATIONS = {
     "🐬 Cabo Girão (Madeira - Estação Pelágica Sul)": (32.6200, -17.0100),
     "🚢 Foz do Tejo / Estuário de Lisboa": (38.6800, -9.3200),
 }
-
-
-def get_cmems_box(lat: float, lon: float, buffer_deg: float = 0.1):
-    """Calcula Bounding Box com buffer e gera snippets para Copernicus Marine."""
-    min_lat = round(max(-90.0, lat - buffer_deg), 4)
-    max_lat = round(min(90.0, lat + buffer_deg), 4)
-    min_lon = round(max(-180.0, lon - buffer_deg), 4)
-    max_lon = round(min(180.0, lon + buffer_deg), 4)
-
-    cli_cmd = (
-        f"copernicusmarine subset -i <DATASET_ID> \\\n"
-        f"  --minimum-longitude {min_lon:.4f} \\\n"
-        f"  --maximum-longitude {max_lon:.4f} \\\n"
-        f"  --minimum-latitude {min_lat:.4f} \\\n"
-        f"  --maximum-latitude {max_lat:.4f}"
-    )
-
-    python_snippet = f"""import copernicusmarine
-
-# Descarregar dados Copernicus Marine para esta estação / vizinhança
-ds = copernicusmarine.subset(
-    dataset_id="cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m",
-    variables=["uo", "vo", "thetao", "so"],
-    minimum_longitude={min_lon:.4f},
-    maximum_longitude={max_lon:.4f},
-    minimum_latitude={min_lat:.4f},
-    maximum_latitude={max_lat:.4f},
-    output_directory="./dados_cmems"
-)"""
-
-    return {
-        "min_lat": min_lat,
-        "max_lat": max_lat,
-        "min_lon": min_lon,
-        "max_lon": max_lon,
-        "cli_cmd": cli_cmd,
-        "python_snippet": python_snippet,
-    }
