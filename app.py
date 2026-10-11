@@ -15,6 +15,8 @@ import plotly.graph_objects as go
 import streamlit as st
 import xarray as xr
 
+import geo_coords as gc
+
 # ---------------------------------------------------------
 # 1. Configuração da Página e Tema Visual
 # ---------------------------------------------------------
@@ -25,6 +27,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
 def get_base64_image(image_path):
     """Carrega uma imagem local e devolve a string Base64."""
     if os.path.exists(image_path):
@@ -32,8 +35,10 @@ def get_base64_image(image_path):
             return base64.b64encode(img_file.read()).decode()
     return None
 
+
 bg_base64 = get_base64_image("assets/background_wave.jpg")
 logo_base64 = get_base64_image("assets/logo.png") or get_base64_image("logo.png")
+
 bg_css = ""
 if bg_base64:
     bg_css = f"""
@@ -58,7 +63,7 @@ if bg_base64:
     """
     st.markdown(bg_css, unsafe_allow_html=True)
 
-# Injeção de CSS Premium Estático (sem f-string para evitar conflitos com chavetas de CSS)
+# Injeção de CSS Premium Estático
 static_css = """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -231,8 +236,8 @@ st.markdown(
         <div class="hero-badge">🌊 Simplificando a vida aos meus alunos</div>
         <h1 class="hero-title">BlueData • OceanNC Studio</h1>
         <p class="hero-subtitle">
-            Plataforma científica para inspeção, amostragem e conversão de dados oceânicos multidimensionais (NetCDF 3D/4D).
-            Gere tabelas prontas para Microsoft Excel, R, Python e QGIS com controlo dimensional inteligente.
+            Plataforma científica para inspeção, amostragem e conversão de dados oceânicos multidimensionais (NetCDF 3D/4D)
+            e calculadora de coordenadas para Copernicus Marine (CMEMS).
         </p>
     </div>
 """,
@@ -249,524 +254,821 @@ with st.sidebar:
     st.info(
         """
         **Porque é que o NetCDF é o padrão?**
-        Modelos numéricos (ex: *Copernicus Marine*, *ROMS*, *NEMO*) e satélites (*Sentinel*, *MODIS*) geram matrizes 4D:
+        Modelos numéricos (*Copernicus Marine*, *ROMS*, *NEMO*) e satélites (*Sentinel*, *MODIS*) geram matrizes 4D:
         
         $$f(\\text{tempo}, \\text{profundidade}, \\text{lat}, \\text{lon})$$
         
-        **O Desafio:** O Excel tem um limite de **1.048.576 linhas**. Esta ferramenta permite fatiar a grelha para isolar a superfície ou a sua área de amostragem.
+        **O Desafio:** O Excel suporta no máximo **1.048.576 linhas**.
+        Esta ferramenta permite isolar a superfície ou a sua área de amostragem.
         """
     )
 
     st.markdown("---")
     st.markdown("### ⚙️ Atalhos de Análise (Presets)")
-    st.caption("Pode utilizar estes atalhos para configurar os filtros habituais da aula.")
+    st.caption("Atalhos rápidos para filtros da aula.")
 
     preset_surface = st.button("🌊 Preset: Biologia de Superfície", use_container_width=True)
     preset_all = st.button("📦 Preset: Exportar Grelha Plena", use_container_width=True)
 
 
 # ---------------------------------------------------------
-# 5. PASSO 1: Importação de Dados
+# 5. MÓDULO 1: Conversor NetCDF → CSV
 # ---------------------------------------------------------
-st.markdown('<div class="step-pill">1. Importação & Fonte de Dados</div>', unsafe_allow_html=True)
+def render_netcdf_tab(preset_all_flag):
+    st.markdown('<div class="step-pill">1. Importação & Fonte de Dados</div>', unsafe_allow_html=True)
 
-col_up, col_sample = st.columns([3, 1])
+    col_up, col_sample = st.columns([3, 1])
 
-with col_up:
-    uploaded_file = st.file_uploader(
-        "Arraste ou selecione o ficheiro NetCDF (.nc, .nc4):",
-        help="Compatível com iPad, Mac e Windows. Suporta ficheiros Copernicus Marine Service, NOAA, NASA OBPG e modelos oceanográficos locais.",
-    )
+    with col_up:
+        uploaded_file = st.file_uploader(
+            "Arraste ou selecione o ficheiro NetCDF (.nc, .nc4):",
+            help="Compatível com iPad, Mac e Windows. Suporta ficheiros Copernicus Marine Service, NOAA, NASA OBPG e modelos locais.",
+        )
 
-with col_sample:
-    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    load_sample = st.button(
-        "🧪 Carregar Dados Algarve (Demo)",
-        use_container_width=True,
-        help="Carrega um conjunto de dados 4D realista da Costa Sul de Portugal (SST, Salinidade, Clorofila-a).",
-    )
+    with col_sample:
+        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+        load_sample = st.button(
+            "🧪 Carregar Dados Algarve (Demo)",
+            use_container_width=True,
+            help="Carrega um conjunto de dados 4D realista da Costa Sul de Portugal (SST, Salinidade, Clorofila-a).",
+        )
 
-ds = None
-filename = ""
+    ds = None
+    filename = ""
 
-if uploaded_file is not None:
-    filename = uploaded_file.name
-    # Garantir sufixo apropriado para os backends do xarray
-    suffix = ".nc4" if ".nc4" in filename.lower() else ".nc"
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
-        tmp_file.write(uploaded_file.getvalue())
-        tmp_path = tmp_file.name
-    try:
-        ds = xr.open_dataset(tmp_path)
-    except Exception as e:
-        st.error(f"⚠️ Não foi possível ler o ficheiro como NetCDF válido (**{filename}**).")
-        st.info("Certifique-se de que selecionou um ficheiro oceanográfico NetCDF (.nc ou .nc4) completo e não corrompido.")
-    finally:
+    if uploaded_file is not None:
+        filename = uploaded_file.name
+        suffix = ".nc4" if ".nc4" in filename.lower() else ".nc"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+            tmp_file.write(uploaded_file.getvalue())
+            tmp_path = tmp_file.name
         try:
-            os.remove(tmp_path)
-        except Exception:
-            pass
+            ds = xr.open_dataset(tmp_path)
+        except Exception as e:
+            st.error(f"⚠️ Não foi possível ler o ficheiro como NetCDF válido (**{filename}**).")
+            st.info("Certifique-se de que selecionou um ficheiro oceanográfico NetCDF (.nc ou .nc4) completo.")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
 
-elif load_sample or "sample_loaded" in st.session_state:
-    st.session_state["sample_loaded"] = True
-    sample_file = "exemplo_oceanografia_algarve.nc"
-    if not os.path.exists(sample_file):
-        from generate_sample_nc import generate_sample_dataset
+    elif load_sample or "sample_loaded" in st.session_state:
+        st.session_state["sample_loaded"] = True
+        sample_file = "exemplo_oceanografia_algarve.nc"
+        if not os.path.exists(sample_file):
+            from generate_sample_nc import generate_sample_dataset
 
-        ds_sample = generate_sample_dataset()
-        ds_sample.to_netcdf(sample_file)
-    filename = "exemplo_oceanografia_algarve.nc (Costa de Portugal)"
-    ds = xr.open_dataset(sample_file)
+            ds_sample = generate_sample_dataset()
+            ds_sample.to_netcdf(sample_file)
+        filename = "exemplo_oceanografia_algarve.nc (Costa de Portugal)"
+        ds = xr.open_dataset(sample_file)
 
+    if ds is not None:
+        st.markdown("---")
+        st.markdown(f'<div class="step-pill">2. Diagnóstico Estrutural • {filename}</div>', unsafe_allow_html=True)
 
-# ---------------------------------------------------------
-# 6. PASSO 2: Diagnóstico e Metadados Estruturais
-# ---------------------------------------------------------
-if ds is not None:
-    st.markdown("---")
-    st.markdown(f'<div class="step-pill">2. Diagnóstico Estrutural • {filename}</div>', unsafe_allow_html=True)
+        time_dim = find_dimension(ds, ["time", "time_counter", "valid_time", "t", "date"])
+        depth_dim = find_dimension(ds, ["depth", "deptht", "lev", "level", "z", "elevation"])
+        lat_dim = find_dimension(ds, ["latitude", "lat", "nav_lat", "y"])
+        lon_dim = find_dimension(ds, ["longitude", "lon", "nav_lon", "x"])
 
-    # Identificar Dimensões
-    time_dim = find_dimension(ds, ["time", "time_counter", "valid_time", "t", "date"])
-    depth_dim = find_dimension(ds, ["depth", "deptht", "lev", "level", "z", "elevation"])
-    lat_dim = find_dimension(ds, ["latitude", "lat", "nav_lat", "y"])
-    lon_dim = find_dimension(ds, ["longitude", "lon", "nav_lon", "x"])
+        dim_sizes, total_raw_points = get_dataset_summary(ds)
+        data_vars = list(ds.data_vars.keys()) or list(ds.variables.keys())
 
-    dim_sizes, total_raw_points = get_dataset_summary(ds)
-    data_vars = list(ds.data_vars.keys()) or list(ds.variables.keys())
-
-    # Indicadores KPI Modernos
-    kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
-
-    with kpi_col1:
-        st.markdown(
-            f"""
-            <div class="kpi-card">
-                <div class="kpi-label">Dimensionalidade</div>
-                <div class="kpi-value">{len(ds.dims)}D</div>
-                <div class="kpi-desc">{'4D (T, Z, Y, X)' if (time_dim and depth_dim) else 'Grelha Espaço-Temporal'}</div>
-            </div>
-        """,
-            unsafe_allow_html=True,
-        )
-
-    with kpi_col2:
-        st.markdown(
-            f"""
-            <div class="kpi-card">
-                <div class="kpi-label">Variáveis de Dados</div>
-                <div class="kpi-value">{len(data_vars)}</div>
-                <div class="kpi-desc">Parâmetros físico-químicos</div>
-            </div>
-        """,
-            unsafe_allow_html=True,
-        )
-
-    with kpi_col3:
-        st.markdown(
-            f"""
-            <div class="kpi-card">
-                <div class="kpi-label">Pontos da Grelha Bruta</div>
-                <div class="kpi-value">{total_raw_points:,}</div>
-                <div class="kpi-desc">Produto das dimensões</div>
-            </div>
-        """,
-            unsafe_allow_html=True,
-        )
-
-    with kpi_col4:
-        pct_excel = min(100.0, (total_raw_points / 1_048_576) * 100)
-        status_color = "#10b981" if total_raw_points <= 1_048_576 else "#ef4444"
-        status_text = "Seguro p/ Excel" if total_raw_points <= 1_048_576 else "Excede Excel!"
-        st.markdown(
-            f"""
-            <div class="kpi-card">
-                <div class="kpi-label">Capacidade Excel</div>
-                <div class="kpi-value" style="color: {status_color};">{status_text}</div>
-                <div class="kpi-desc">{pct_excel:.1f}% do teto de 1M linhas</div>
-            </div>
-        """,
-            unsafe_allow_html=True,
-        )
-
-    # Tabs de Exploração e Metadados
-    with st.expander("🔬 Inspecionar Dimensões Detalhadas & Atributos Globais"):
-        tab_dims, tab_attrs = st.tabs(["Dimensões e Coordenadas", "Metadados Globais (CF / NetCDF)"])
-
-        with tab_dims:
-            dim_records = []
-            for d, sz in dim_sizes.items():
-                kind = "Outra"
-                detail = "-"
-                if d == time_dim:
-                    kind = "Tempo (Time)"
-                    t_vals = ds[d].values
-                    detail = f"{str(t_vals[0])[:10]} até {str(t_vals[-1])[:10]}"
-                elif d == depth_dim:
-                    kind = "Profundidade (Depth)"
-                    z_vals = ds[d].values
-                    unit = ds[d].attrs.get("units", "m")
-                    detail = f"{float(z_vals[0]):.1f} a {float(z_vals[-1]):.1f} {unit}"
-                elif d == lat_dim:
-                    kind = "Latitude"
-                    l_vals = ds[d].values
-                    detail = f"{float(np.min(l_vals)):.2f}º a {float(np.max(l_vals)):.2f}º N"
-                elif d == lon_dim:
-                    kind = "Longitude"
-                    lo_vals = ds[d].values
-                    detail = f"{float(np.min(lo_vals)):.2f}º a {float(np.max(lo_vals)):.2f}º E/W"
-
-                dim_records.append({"Dimensão": d, "Classificação": kind, "Pontos": sz, "Intervalo": detail})
-            st.dataframe(pd.DataFrame(dim_records), use_container_width=True)
-
-        with tab_attrs:
-            if ds.attrs:
-                st.json(dict(ds.attrs))
-            else:
-                st.caption("Sem atributos globais no ficheiro.")
-
-    # ---------------------------------------------------------
-    # 7. PASSO 3: Filtros e Configuração Dimensional
-    # ---------------------------------------------------------
-    st.markdown("---")
-    st.markdown('<div class="step-pill">3. Filtros & Reshape Tabular</div>', unsafe_allow_html=True)
-
-    # 1. Seleção de Variáveis
-    var_labels = {}
-    for v in data_vars:
-        long_name = ds[v].attrs.get("long_name", v)
-        units = ds[v].attrs.get("units", "")
-        var_labels[v] = f"{v} — {long_name} ({units})" if units else f"{v} — {long_name}"
-
-    f_col1, f_col2 = st.columns(2)
-
-    with f_col1:
-        st.markdown("##### 🧪 1. Parâmetros a Extrair")
-        
-        var_dropdown_options = [
-            f"🌟 Todas as variáveis ({len(data_vars)} parâmetros)",
-            "✏️ Seleção personalizada (escolher múltiplas)",
-        ] + data_vars
-
-        param_choice = st.selectbox(
-            "Selecione o que pretende extrair no menu:",
-            options=var_dropdown_options,
-            format_func=lambda x: (
-                x if (x.startswith("🌟") or x.startswith("✏️"))
-                else f"{x} — {ds[x].attrs.get('long_name', x)}" + (f" ({ds[x].attrs.get('units', '')})" if ds[x].attrs.get("units") else "")
-            ),
-            index=0,
-            help="Escolha todas as variáveis ou selecione um parâmetro oceanográfico específico.",
-        )
-
-        if param_choice.startswith("🌟"):
-            selected_vars = data_vars
-            st.caption(f"✓ Serão extraídas todas as colunas: `{', '.join(data_vars)}`")
-        elif param_choice.startswith("✏️"):
-            selected_vars = []
-            cols_chk = st.columns(2)
-            for idx, v in enumerate(data_vars):
-                with cols_chk[idx % 2]:
-                    chk = st.checkbox(f"{v}", value=True, key=f"chk_var_{v}", help=ds[v].attrs.get('long_name', v))
-                    if chk:
-                        selected_vars.append(v)
-            if not selected_vars:
-                st.warning("⚠️ Selecione pelo menos uma variável.")
-                st.stop()
-        else:
-            selected_vars = [param_choice]
-            unit_info = f" ({ds[param_choice].attrs.get('units', '')})" if ds[param_choice].attrs.get("units") else ""
-            st.caption(f"✓ Extrair apenas: **{param_choice}**{unit_info}")
-
-    with f_col2:
-        st.markdown("##### 🌊 2. Dimensão Vertical (Profundidade)")
-        if depth_dim and depth_dim in ds.dims:
-            z_vals = ds[depth_dim].values
-            z_unit = ds[depth_dim].attrs.get("units", "m")
-
-            depth_mode = st.radio(
-                f"Níveis de profundidade detetados ({len(z_vals)} níveis em `{depth_dim}`):",
-                [
-                    "🟢 Apenas Superfície (0 m / nível 0) [Padrão de Biologia]",
-                    "🔵 Escolher Nível Específico",
-                    "🟡 Toda a Coluna de Água (Todas as profundidades)",
-                ],
-                index=0 if not preset_all else 2,
+        # KPIs
+        kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+        with kpi_col1:
+            st.markdown(
+                f"""
+                <div class="kpi-card">
+                    <div class="kpi-label">Dimensionalidade</div>
+                    <div class="kpi-value">{len(ds.dims)}D</div>
+                    <div class="kpi-desc">{'4D (T, Z, Y, X)' if (time_dim and depth_dim) else 'Grelha Espaço-Temporal'}</div>
+                </div>
+            """,
+                unsafe_allow_html=True,
+            )
+        with kpi_col2:
+            st.markdown(
+                f"""
+                <div class="kpi-card">
+                    <div class="kpi-label">Variáveis de Dados</div>
+                    <div class="kpi-value">{len(data_vars)}</div>
+                    <div class="kpi-desc">Parâmetros físico-químicos</div>
+                </div>
+            """,
+                unsafe_allow_html=True,
+            )
+        with kpi_col3:
+            st.markdown(
+                f"""
+                <div class="kpi-card">
+                    <div class="kpi-label">Pontos da Grelha Bruta</div>
+                    <div class="kpi-value">{total_raw_points:,}</div>
+                    <div class="kpi-desc">Produto das dimensões</div>
+                </div>
+            """,
+                unsafe_allow_html=True,
+            )
+        with kpi_col4:
+            pct_excel = min(100.0, (total_raw_points / 1_048_576) * 100)
+            status_color = "#10b981" if total_raw_points <= 1_048_576 else "#ef4444"
+            status_text = "Seguro p/ Excel" if total_raw_points <= 1_048_576 else "Excede Excel!"
+            st.markdown(
+                f"""
+                <div class="kpi-card">
+                    <div class="kpi-label">Capacidade Excel</div>
+                    <div class="kpi-value" style="color: {status_color};">{status_text}</div>
+                    <div class="kpi-desc">{pct_excel:.1f}% do teto de 1M linhas</div>
+                </div>
+            """,
+                unsafe_allow_html=True,
             )
 
-            chosen_z_idx = 0
-            if "Superfície" in depth_mode:
-                chosen_z_idx = 0
-            elif "Específico" in depth_mode:
-                z_options = [f"{float(val):.1f} {z_unit} (nível {i})" for i, val in enumerate(z_vals)]
-                chosen_z_str = st.selectbox("Selecione o nível vertical:", options=z_options)
-                chosen_z_idx = z_options.index(chosen_z_str)
+        with st.expander("🔬 Inspecionar Dimensões Detalhadas & Atributos Globais"):
+            tab_dims, tab_attrs = st.tabs(["Dimensões e Coordenadas", "Metadados Globais (CF / NetCDF)"])
+            with tab_dims:
+                dim_records = []
+                for d, sz in dim_sizes.items():
+                    kind = "Outra"
+                    detail = "-"
+                    if d == time_dim:
+                        kind = "Tempo (Time)"
+                        t_vals = ds[d].values
+                        detail = f"{str(t_vals[0])[:10]} até {str(t_vals[-1])[:10]}"
+                    elif d == depth_dim:
+                        kind = "Profundidade (Depth)"
+                        z_vals = ds[d].values
+                        unit = ds[d].attrs.get("units", "m")
+                        detail = f"{float(z_vals[0]):.1f} a {float(z_vals[-1]):.1f} {unit}"
+                    elif d == lat_dim:
+                        kind = "Latitude"
+                        l_vals = ds[d].values
+                        detail = f"{float(np.min(l_vals)):.2f}º a {float(np.max(l_vals)):.2f}º N"
+                    elif d == lon_dim:
+                        kind = "Longitude"
+                        lo_vals = ds[d].values
+                        detail = f"{float(np.min(lo_vals)):.2f}º a {float(np.max(lo_vals)):.2f}º E/W"
+                    dim_records.append({"Dimensão": d, "Classificação": kind, "Pontos": sz, "Intervalo": detail})
+                st.dataframe(pd.DataFrame(dim_records), use_container_width=True)
+            with tab_attrs:
+                if ds.attrs:
+                    st.json(dict(ds.attrs))
+                else:
+                    st.caption("Sem atributos globais no ficheiro.")
+
+        st.markdown("---")
+        st.markdown('<div class="step-pill">3. Filtros & Reshape Tabular</div>', unsafe_allow_html=True)
+
+        f_col1, f_col2 = st.columns(2)
+
+        with f_col1:
+            st.markdown("##### 🧪 1. Parâmetros a Extrair")
+            var_dropdown_options = [
+                f"🌟 Todas as variáveis ({len(data_vars)} parâmetros)",
+                "✏️ Seleção personalizada (escolher múltiplas)",
+            ] + data_vars
+
+            param_choice = st.selectbox(
+                "Selecione o que pretende extrair no menu:",
+                options=var_dropdown_options,
+                format_func=lambda x: (
+                    x if (x.startswith("🌟") or x.startswith("✏️"))
+                    else f"{x} — {ds[x].attrs.get('long_name', x)}" + (f" ({ds[x].attrs.get('units', '')})" if ds[x].attrs.get("units") else "")
+                ),
+                index=0,
+                help="Escolha todas as variáveis ou selecione um parâmetro específico.",
+            )
+
+            if param_choice.startswith("🌟"):
+                selected_vars = data_vars
+                st.caption(f"✓ Serão extraídas todas as colunas: `{', '.join(data_vars)}`")
+            elif param_choice.startswith("✏️"):
+                selected_vars = []
+                cols_chk = st.columns(2)
+                for idx, v in enumerate(data_vars):
+                    with cols_chk[idx % 2]:
+                        chk = st.checkbox(f"{v}", value=True, key=f"chk_var_{v}", help=ds[v].attrs.get('long_name', v))
+                        if chk:
+                            selected_vars.append(v)
+                if not selected_vars:
+                    st.warning("⚠️ Selecione pelo menos uma variável.")
+                    st.stop()
             else:
+                selected_vars = [param_choice]
+                unit_info = f" ({ds[param_choice].attrs.get('units', '')})" if ds[param_choice].attrs.get("units") else ""
+                st.caption(f"✓ Extrair apenas: **{param_choice}**{unit_info}")
+
+        with f_col2:
+            st.markdown("##### 🌊 2. Dimensão Vertical (Profundidade)")
+            if depth_dim and depth_dim in ds.dims:
+                z_vals = ds[depth_dim].values
+                z_unit = ds[depth_dim].attrs.get("units", "m")
+
+                depth_mode = st.radio(
+                    f"Níveis de profundidade detetados ({len(z_vals)} níveis em `{depth_dim}`):",
+                    [
+                        "🟢 Apenas Superfície (0 m / nível 0) [Padrão de Biologia]",
+                        "🔵 Escolher Nível Específico",
+                        "🟡 Toda a Coluna de Água (Todas as profundidades)",
+                    ],
+                    index=0 if not preset_all_flag else 2,
+                )
+
+                chosen_z_idx = 0
+                if "Superfície" in depth_mode:
+                    chosen_z_idx = 0
+                elif "Específico" in depth_mode:
+                    z_options = [f"{float(val):.1f} {z_unit} (nível {i})" for i, val in enumerate(z_vals)]
+                    chosen_z_str = st.selectbox("Selecione o nível vertical:", options=z_options)
+                    chosen_z_idx = z_options.index(chosen_z_str)
+                else:
+                    chosen_z_idx = None
+            else:
+                st.caption("ℹ️ Ficheiro sem dimensão vertical (dados de superfície ou camada única).")
                 chosen_z_idx = None
-        else:
-            st.caption("ℹ️ Ficheiro sem dimensão vertical (dados de superfície ou camada única).")
-            chosen_z_idx = None
 
-    f_col3, f_col4 = st.columns(2)
+        f_col3, f_col4 = st.columns(2)
 
-    with f_col3:
-        st.markdown("##### ⏱️ 3. Dimensão Temporal")
-        if time_dim and time_dim in ds.dims:
-            t_vals = ds[time_dim].values
-            n_t = len(t_vals)
+        with f_col3:
+            st.markdown("##### ⏱️ 3. Dimensão Temporal")
+            if time_dim and time_dim in ds.dims:
+                t_vals = ds[time_dim].values
+                n_t = len(t_vals)
 
-            time_mode = st.radio(
-                f"Passos temporais detetados ({n_t} registos em `{time_dim}`):",
-                ["📅 Todos os passos temporais", "🎯 Selecionar uma data específica"],
+                time_mode = st.radio(
+                    f"Passos temporais detetados ({n_t} registos em `{time_dim}`):",
+                    ["📅 Todos os passos temporais", "🎯 Selecionar uma data específica"],
+                    index=0,
+                )
+
+                chosen_t_idx = None
+                if "específica" in time_mode:
+                    t_str_list = [str(t)[:19] for t in t_vals]
+                    chosen_t_str = st.selectbox("Data/Hora da amostragem:", options=t_str_list)
+                    chosen_t_idx = t_str_list.index(chosen_t_str)
+            else:
+                st.caption("ℹ️ Ficheiro sem dimensão temporal.")
+                chosen_t_idx = None
+
+        with f_col4:
+            st.markdown("##### 🗺️ 4. Recorte Espacial (Bounding Box)")
+            enable_crop = st.checkbox("Ativar recorte de coordenadas geográficas", value=False)
+            crop_lat_min, crop_lat_max = None, None
+            crop_lon_min, crop_lon_max = None, None
+
+            if enable_crop and lat_dim and lon_dim:
+                all_lats = ds[lat_dim].values
+                all_lons = ds[lon_dim].values
+
+                synced_box = st.session_state.get("synced_cmems_box")
+                if synced_box:
+                    st.info(
+                        f"💡 Coordenadas da Calculadora CMEMS disponíveis: "
+                        f"Lat [{synced_box['min_lat']}, {synced_box['max_lat']}] | Lon [{synced_box['min_lon']}, {synced_box['max_lon']}]."
+                    )
+                    if st.button("Usar Coordenadas da Calculadora CMEMS", key="btn_apply_synced_coords"):
+                        st.session_state["use_synced_coords"] = True
+
+                use_synced = st.session_state.get("use_synced_coords", False)
+                def_lat_min = float(synced_box["min_lat"]) if (synced_box and use_synced) else float(np.min(all_lats))
+                def_lat_max = float(synced_box["max_lat"]) if (synced_box and use_synced) else float(np.max(all_lats))
+                def_lon_min = float(synced_box["min_lon"]) if (synced_box and use_synced) else float(np.min(all_lons))
+                def_lon_max = float(synced_box["max_lon"]) if (synced_box and use_synced) else float(np.max(all_lons))
+
+                c_l1, c_l2 = st.columns(2)
+                with c_l1:
+                    crop_lat_min = st.number_input("Lat Mín (ºN)", value=def_lat_min, step=0.1, format="%.2f", key="inp_c_lat_min")
+                with c_l2:
+                    crop_lat_max = st.number_input("Lat Máx (ºN)", value=def_lat_max, step=0.1, format="%.2f", key="inp_c_lat_max")
+
+                c_lo1, c_lo2 = st.columns(2)
+                with c_lo1:
+                    crop_lon_min = st.number_input("Lon Mín (ºE/W)", value=def_lon_min, step=0.1, format="%.2f", key="inp_c_lon_min")
+                with c_lo2:
+                    crop_lon_max = st.number_input("Lon Máx (ºE/W)", value=def_lon_max, step=0.1, format="%.2f", key="inp_c_lon_max")
+            elif enable_crop:
+                st.caption("Coordenadas espaciais não identificadas para recorte.")
+
+        # Opções de Limpeza e Exportação
+        st.markdown("##### 🧹 5. Parâmetros de Formatação & Limpeza")
+        opt1, opt2, opt3 = st.columns(3)
+
+        with opt1:
+            clean_nans = st.checkbox(
+                "Descartar pontos de terra (NaNs)",
+                value=True,
+                help="Remove linhas sem dados oceanográficos válidos (continente ou falhas de sensor).",
+            )
+
+        with opt2:
+            csv_sep_choice = st.selectbox(
+                "Separador de Colunas:",
+                [", (Vírgula — Padrão Internacional / R / QGIS)", "; (Ponto e Vírgula — Padrão Excel PT)"],
                 index=0,
             )
+            csv_sep = ";" if ";" in csv_sep_choice else ","
 
-            chosen_t_idx = None
-            if "específica" in time_mode:
-                t_str_list = [str(t)[:19] for t in t_vals]
-                chosen_t_str = st.selectbox("Data/Hora da amostragem:", options=t_str_list)
-                chosen_t_idx = t_str_list.index(chosen_t_str)
+        with opt3:
+            decimal_choice = st.selectbox(
+                "Separador Decimal:",
+                [". (Ponto — 36.5)", ", (Vírgula — 36,5 — Excel PT)"],
+                index=0 if csv_sep == "," else 1,
+            )
+            decimal_sep = "," if "," in decimal_choice else "."
+
+        # Aplicação dos Filtros
+        filtered_ds = ds[selected_vars]
+
+        if depth_dim and depth_dim in filtered_ds.dims and chosen_z_idx is not None:
+            filtered_ds = filtered_ds.isel({depth_dim: chosen_z_idx})
+
+        if time_dim and time_dim in filtered_ds.dims and chosen_t_idx is not None:
+            filtered_ds = filtered_ds.isel({time_dim: chosen_t_idx})
+
+        if enable_crop and lat_dim and lon_dim and crop_lat_min is not None:
+            try:
+                lat_slice = slice(min(crop_lat_min, crop_lat_max), max(crop_lat_min, crop_lat_max))
+                lon_slice = slice(min(crop_lon_min, crop_lon_max), max(crop_lon_min, crop_lon_max))
+                filtered_ds = filtered_ds.sel({lat_dim: lat_slice, lon_dim: lon_slice})
+            except Exception as e:
+                st.warning(f"Aviso no recorte espacial: {e}")
+
+        _, estimated_rows = get_dataset_summary(filtered_ds)
+
+        # Barra Visual de Capacidade
+        st.markdown("---")
+        st.markdown("##### 📈 Estimativa de Volume Pós-Filtros")
+
+        usage_ratio = estimated_rows / 1_048_576
+        usage_pct = min(100.0, usage_ratio * 100)
+        fill_class = "capacity-fill-safe" if usage_ratio <= 1.0 else "capacity-fill-warn"
+
+        st.markdown(
+            f"""
+            <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #94a3b8;">
+                <span>Linhas estimadas: <strong>{estimated_rows:,}</strong></span>
+                <span>Teto do Excel: <strong>1.048.576</strong></span>
+            </div>
+            <div class="capacity-container">
+                <div class="{fill_class}" style="width: {usage_pct:.1f}%;"></div>
+            </div>
+        """,
+            unsafe_allow_html=True,
+        )
+
+        if estimated_rows > 1_048_576:
+            st.error(
+                f"⚠️ **Atenção pedagógica:** Esta configuração gerará ~{estimated_rows:,} linhas, "
+                "o que excede o limite do Microsoft Excel. Filtre por profundidade ou recorte as coordenadas para conseguir abrir no Excel."
+            )
         else:
-            st.caption("ℹ️ Ficheiro sem dimensão temporal.")
-            chosen_t_idx = None
+            st.success(f"✅ **Tamanho ideal:** A grelha filtrada ({estimated_rows:,} pontos) é 100% compatível com Excel, R e QGIS.")
 
-    with f_col4:
-        st.markdown("##### 🗺️ 4. Recorte Espacial (Bounding Box)")
-        enable_crop = st.checkbox("Ativar recorte de coordenadas geográficas", value=False)
-        crop_lat_min, crop_lat_max = None, None
-        crop_lon_min, crop_lon_max = None, None
+        st.markdown("---")
+        st.markdown('<div class="step-pill">4. Visualização Oceanográfica & Exportação</div>', unsafe_allow_html=True)
 
-        if enable_crop and lat_dim and lon_dim:
-            all_lats = ds[lat_dim].values
-            all_lons = ds[lon_dim].values
+        with st.expander("🗺️ Pré-visualização Oceanográfica Interativa (Mapas & Perfis CTD)", expanded=True):
+            viz_tab_map, viz_tab_profile = st.tabs(["Mapa de Superfície (Campo 2D)", "Perfil Vertical (CTD / Profundidade)"])
 
-            c_l1, c_l2 = st.columns(2)
-            with c_l1:
-                crop_lat_min = st.number_input("Lat Mín (ºN)", value=float(np.min(all_lats)), step=0.1, format="%.2f")
-            with c_l2:
-                crop_lat_max = st.number_input("Lat Máx (ºN)", value=float(np.max(all_lats)), step=0.1, format="%.2f")
+            with viz_tab_map:
+                if lat_dim and lon_dim and len(selected_vars) > 0:
+                    first_var = selected_vars[0]
+                    slice_2d = filtered_ds[first_var]
+                    for d in slice_2d.dims:
+                        if d not in [lat_dim, lon_dim]:
+                            slice_2d = slice_2d.isel({d: 0})
 
-            c_lo1, c_lo2 = st.columns(2)
-            with c_lo1:
-                crop_lon_min = st.number_input("Lon Mín (ºE/W)", value=float(np.min(all_lons)), step=0.1, format="%.2f")
-            with c_lo2:
-                crop_lon_max = st.number_input("Lon Máx (ºE/W)", value=float(np.max(all_lons)), step=0.1, format="%.2f")
-        elif enable_crop:
-            st.caption("Coordenadas espaciais não identificadas para recorte.")
+                    lats = slice_2d[lat_dim].values
+                    lons = slice_2d[lon_dim].values
+                    vals = slice_2d.values
 
-    # Opções de Limpeza e Exportação
-    st.markdown("##### 🧹 5. Parâmetros de Formatação & Limpeza")
-    opt1, opt2, opt3 = st.columns(3)
+                    fig_map = px.imshow(
+                        vals,
+                        x=lons,
+                        y=lats,
+                        labels={"x": "Longitude (º)", "y": "Latitude (º)", "color": first_var},
+                        color_continuous_scale="Viridis",
+                        origin="lower",
+                        title=f"Distribuição Espacial de <b>{first_var}</b> ({ds[first_var].attrs.get('units', '')})",
+                    )
+                    fig_map.update_layout(
+                        template="plotly_dark",
+                        margin=dict(l=40, r=40, t=50, b=40),
+                        height=380,
+                    )
+                    st.plotly_chart(fig_map, use_container_width=True)
+                else:
+                    st.caption("Coordenadas geográficas insuficientes para mapa 2D.")
 
-    with opt1:
-        clean_nans = st.checkbox(
-            "Descartar pontos de terra (NaNs)",
-            value=True,
-            help="Remove linhas sem dados oceanográficos válidos (continente ou falhas de sensor).",
-        )
+            with viz_tab_profile:
+                if depth_dim and depth_dim in ds.dims and len(selected_vars) > 0:
+                    first_var = selected_vars[0]
+                    var_data = ds[first_var]
+                    mean_dims = [d for d in var_data.dims if d != depth_dim and d != time_dim]
+                    if mean_dims:
+                        profile_series = var_data.mean(dim=mean_dims)
+                    else:
+                        profile_series = var_data
 
-    with opt2:
-        csv_sep_choice = st.selectbox(
-            "Separador de Colunas:",
-            [", (Vírgula — Padrão Internacional / R / QGIS)", "; (Ponto e Vírgula — Padrão Excel PT)"],
-            index=0,
-        )
-        csv_sep = ";" if ";" in csv_sep_choice else ","
+                    if time_dim in profile_series.dims:
+                        profile_series = profile_series.isel({time_dim: 0})
 
-    with opt3:
-        decimal_choice = st.selectbox(
-            "Separador Decimal:",
-            [". (Ponto — 36.5)", ", (Vírgula — 36,5 — Excel PT)"],
-            index=0 if csv_sep == "," else 1,
-        )
-        decimal_sep = "," if "," in decimal_choice else "."
+                    z_coords = ds[depth_dim].values
+                    p_vals = profile_series.values
 
-    # Aplicação dos Filtros no Dataset
-    filtered_ds = ds[selected_vars]
+                    fig_prof = go.Figure()
+                    fig_prof.add_trace(
+                        go.Scatter(
+                            x=p_vals,
+                            y=z_coords,
+                            mode="lines+markers",
+                            line=dict(color="#38bdf8", width=3),
+                            marker=dict(size=8, color="#0284c7"),
+                            name=first_var,
+                        )
+                    )
+                    fig_prof.update_layout(
+                        template="plotly_dark",
+                        title=f"Perfil Vertical de <b>{first_var}</b> (Média da Grelha)",
+                        xaxis_title=f"{first_var} ({ds[first_var].attrs.get('units', '')})",
+                        yaxis_title=f"Profundidade ({ds[depth_dim].attrs.get('units', 'm')})",
+                        yaxis=dict(autorange="reversed"),
+                        margin=dict(l=40, r=40, t=50, b=40),
+                        height=380,
+                    )
+                    st.plotly_chart(fig_prof, use_container_width=True)
+                else:
+                    st.caption("Ficheiro sem dimensão de profundidade para perfil CTD.")
 
-    if depth_dim and depth_dim in filtered_ds.dims and chosen_z_idx is not None:
-        filtered_ds = filtered_ds.isel({depth_dim: chosen_z_idx})
+        col_btn, _ = st.columns([2, 1])
+        with col_btn:
+            generate_table = st.button("⚡ Processar Tabela e Gerar CSV", type="primary", use_container_width=True)
 
-    if time_dim and time_dim in filtered_ds.dims and chosen_t_idx is not None:
-        filtered_ds = filtered_ds.isel({time_dim: chosen_t_idx})
+        if generate_table or "processed_df" in st.session_state:
+            if generate_table:
+                with st.spinner("A converter grelha oceanográfica para formato tabular..."):
+                    try:
+                        df = filtered_ds.to_dataframe().reset_index()
+                        if clean_nans:
+                            len_before = len(df)
+                            df = df.dropna(subset=selected_vars, how="all")
+                            len_after = len(df)
+                            st.info(f"🧹 **Limpeza Efetuada**: Removidos {len_before - len_after:,} pontos com valores nulos (ex: terra).")
+                        st.session_state["processed_df"] = df
+                        st.session_state["processed_ready"] = True
+                    except Exception as e:
+                        st.error(f"Erro na conversão: {e}")
 
-    if enable_crop and lat_dim and lon_dim and crop_lat_min is not None:
-        try:
-            lat_slice = slice(min(crop_lat_min, crop_lat_max), max(crop_lat_min, crop_lat_max))
-            lon_slice = slice(min(crop_lon_min, crop_lon_max), max(crop_lon_min, crop_lon_max))
-            filtered_ds = filtered_ds.sel({lat_dim: lat_slice, lon_dim: lon_slice})
-        except Exception as e:
-            st.warning(f"Aviso no recorte espacial: {e}")
+            if st.session_state.get("processed_ready", False):
+                df = st.session_state["processed_df"]
+                st.markdown(f"#### 📋 Tabela Final: `{len(df):,}` linhas × `{len(df.columns)}` colunas")
+                st.dataframe(df.head(20), use_container_width=True)
 
-    _, estimated_rows = get_dataset_summary(filtered_ds)
+                with st.expander("📊 Estatísticas Descritivas dos Dados (Média, Desvio Padrão, Quartis)"):
+                    st.dataframe(df.describe(), use_container_width=True)
 
-    # Barra Visual de Capacidade
-    st.markdown("---")
-    st.markdown("##### 📈 Estimativa de Volume Pós-Filtros")
+                csv_buf = io.StringIO()
+                df.to_csv(csv_buf, sep=csv_sep, decimal=decimal_sep, index=False)
+                csv_bytes = csv_buf.getvalue().encode("utf-8-sig")
 
-    usage_ratio = estimated_rows / 1_048_576
-    usage_pct = min(100.0, usage_ratio * 100)
-    fill_class = "capacity-fill-safe" if usage_ratio <= 1.0 else "capacity-fill-warn"
+                clean_base = filename.replace(".nc", "").replace(".nc4", "").replace(" ", "_")
+                out_name = f"{clean_base}_ocean_data.csv"
 
+                st.download_button(
+                    label=f"📥 Descarregar Ficheiro CSV ({len(csv_bytes)/1024:.1f} KB)",
+                    data=csv_bytes,
+                    file_name=out_name,
+                    mime="text/csv",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+
+# ---------------------------------------------------------
+# 6. MÓDULO 2: Calculadora de Coordenadas & CMEMS
+# ---------------------------------------------------------
+def render_coords_tab():
+    st.markdown('<div class="step-pill">🧭 Calculadora de Coordenadas & CMEMS</div>', unsafe_allow_html=True)
     st.markdown(
-        f"""
-        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #94a3b8;">
-            <span>Linhas estimadas: <strong>{estimated_rows:,}</strong></span>
-            <span>Teto do Excel: <strong>1.048.576</strong></span>
-        </div>
-        <div class="capacity-container">
-            <div class="{fill_class}" style="width: {usage_pct:.1f}%;"></div>
-        </div>
-    """,
-        unsafe_allow_html=True,
+        "Converta coordenadas geográficas entre **Graus Decimais (DD)**, **GPS Náutico (DMM)** e **Cartas Náuticas (DMS)**, "
+        "com visualização direta das componentes **N, S, E, W** e código pronto para descarregar pontos no **Copernicus Marine (CMEMS)**."
     )
 
-    if estimated_rows > 1_048_576:
-        st.error(
-            f"⚠️ **Atenção pedagógica:** Esta configuração gerará ~{estimated_rows:,} linhas, "
-            "o que excede o limite do Microsoft Excel. Filtre por profundidade ou recorte as coordenadas para conseguir abrir no Excel."
+    # Presets Didáticos
+    col_pre, _ = st.columns([2, 1])
+    with col_pre:
+        preset_choice = st.selectbox(
+            "⚓ Carregar Estação Oceanográfica Didática (Portugal & Regiões):",
+            options=list(gc.PRESET_LOCATIONS.keys()),
+            index=0,
+            help="Carrega coordenadas de estações conhecidas da costa portuguesa, ilhas e montes submarinos.",
         )
-    else:
-        st.success(f"✅ **Tamanho ideal:** A grelha filtrada ({estimated_rows:,} pontos) é 100% compatível com Excel, R e QGIS.")
 
-    # ---------------------------------------------------------
-    # 8. PASSO 4: Visualização Interativa & Exportação
-    # ---------------------------------------------------------
-    st.markdown("---")
-    st.markdown('<div class="step-pill">4. Visualização Oceanográfica & Exportação</div>', unsafe_allow_html=True)
+    default_lat = 37.0150
+    default_lon = -7.9350
+    if preset_choice != "Personalizado" and gc.PRESET_LOCATIONS.get(preset_choice) is not None:
+        default_lat, default_lon = gc.PRESET_LOCATIONS[preset_choice]
 
-    # Painel com Visualizações Gráficas Científicas
-    with st.expander("🗺️ Pré-visualização Oceanográfica Interativa (Mapas & Perfis CTD)", expanded=True):
-        viz_tab_map, viz_tab_profile = st.tabs(["Mapa de Superfície (Campo 2D)", "Perfil Vertical (CTD / Profundidade)"])
+    # Modos de Entrada
+    mode_choice = st.radio(
+        "Formato de Entrada das Coordenadas:",
+        [
+            "1️⃣ Graus Decimais (DD com sinal: ex. 37.015, -7.935)",
+            "2️⃣ Componentes Cardinais (Graus Decimais com N/S e E/W)",
+            "3️⃣ GPS Náutico / Diário de Bordo (DMM - Graus e Minutos Decimais)",
+            "4️⃣ Cartografia / Cartas Náuticas (DMS - Graus, Minutos e Segundos)",
+            "📋 Colar Texto Livre (Smart Parser)",
+        ],
+        horizontal=True,
+    )
 
-        with viz_tab_map:
-            # Gráfico de Campo 2D se tivermos Lat e Lon
-            if lat_dim and lon_dim and len(selected_vars) > 0:
-                first_var = selected_vars[0]
-                slice_2d = filtered_ds[first_var]
+    curr_lat = default_lat
+    curr_lon = default_lon
 
-                # Reduzir dimensões restantes se necessário (ex: pegar primeiro passo de tempo e prof)
-                for d in slice_2d.dims:
-                    if d not in [lat_dim, lon_dim]:
-                        slice_2d = slice_2d.isel({d: 0})
-
-                lats = slice_2d[lat_dim].values
-                lons = slice_2d[lon_dim].values
-                vals = slice_2d.values
-
-                # Plotly Heatmap
-                fig_map = px.imshow(
-                    vals,
-                    x=lons,
-                    y=lats,
-                    labels={"x": "Longitude (º)", "y": "Latitude (º)", "color": first_var},
-                    color_continuous_scale="Viridis",
-                    origin="lower",
-                    title=f"Distribuição Espacial de <b>{first_var}</b> ({ds[first_var].attrs.get('units', '')})",
-                )
-                fig_map.update_layout(
-                    template="plotly_dark",
-                    margin=dict(l=40, r=40, t=50, b=40),
-                    height=380,
-                )
-                st.plotly_chart(fig_map, use_container_width=True)
-            else:
-                st.caption("Coordenadas geográficas insuficientes para mapa 2D.")
-
-        with viz_tab_profile:
-            # Perfil vertical CTD se existir dimensão depth
-            if depth_dim and depth_dim in ds.dims and len(selected_vars) > 0:
-                first_var = selected_vars[0]
-                var_data = ds[first_var]
-
-                # Média espacial para obter o perfil vertical
-                mean_dims = [d for d in var_data.dims if d != depth_dim and d != time_dim]
-                if mean_dims:
-                    profile_series = var_data.mean(dim=mean_dims)
-                else:
-                    profile_series = var_data
-
-                if time_dim in profile_series.dims:
-                    profile_series = profile_series.isel({time_dim: 0})
-
-                z_coords = ds[depth_dim].values
-                p_vals = profile_series.values
-
-                fig_prof = go.Figure()
-                fig_prof.add_trace(
-                    go.Scatter(
-                        x=p_vals,
-                        y=z_coords,
-                        mode="lines+markers",
-                        line=dict(color="#38bdf8", width=3),
-                        marker=dict(size=8, color="#0284c7"),
-                        name=first_var,
-                    )
-                )
-                fig_prof.update_layout(
-                    template="plotly_dark",
-                    title=f"Perfil Vertical de <b>{first_var}</b> (Média da Grelha)",
-                    xaxis_title=f"{first_var} ({ds[first_var].attrs.get('units', '')})",
-                    yaxis_title=f"Profundidade ({ds[depth_dim].attrs.get('units', 'm')})",
-                    yaxis=dict(autorange="reversed"),  # Superfície no topo
-                    margin=dict(l=40, r=40, t=50, b=40),
-                    height=380,
-                )
-                st.plotly_chart(fig_prof, use_container_width=True)
-            else:
-                st.caption("Ficheiro sem dimensão de profundidade para perfil CTD.")
-
-    # Processamento Final para CSV
-    col_btn, _ = st.columns([2, 1])
-    with col_btn:
-        generate_table = st.button("⚡ Processar Tabela e Gerar CSV", type="primary", use_container_width=True)
-
-    if generate_table or "processed_df" in st.session_state:
-        if generate_table:
-            with st.spinner("A converter grelha oceanográfica para formato tabular..."):
-                try:
-                    df = filtered_ds.to_dataframe().reset_index()
-
-                    if clean_nans:
-                        len_before = len(df)
-                        df = df.dropna(subset=selected_vars, how="all")
-                        len_after = len(df)
-                        st.info(f"🧹 **Limpeza Efetuada**: Removidos {len_before - len_after:,} pontos com valores nulos (ex: terra).")
-
-                    st.session_state["processed_df"] = df
-                    st.session_state["processed_ready"] = True
-                except Exception as e:
-                    st.error(f"Erro na conversão: {e}")
-
-        if st.session_state.get("processed_ready", False):
-            df = st.session_state["processed_df"]
-
-            st.markdown(f"#### 📋 Tabela Final: `{len(df):,}` linhas × `{len(df.columns)}` colunas")
-            st.dataframe(df.head(20), use_container_width=True)
-
-            # Métricas estatísticas de apoio aos alunos
-            with st.expander("📊 Estatísticas Descritivas dos Dados (Média, Desvio Padrão, Quartis)"):
-                st.dataframe(df.describe(), use_container_width=True)
-
-            # Exportação de Ficheiro
-            csv_buf = io.StringIO()
-            df.to_csv(csv_buf, sep=csv_sep, decimal=decimal_sep, index=False)
-            csv_bytes = csv_buf.getvalue().encode("utf-8-sig")
-
-            clean_base = filename.replace(".nc", "").replace(".nc4", "").replace(" ", "_")
-            out_name = f"{clean_base}_ocean_data.csv"
-
-            st.download_button(
-                label=f"📥 Descarregar Ficheiro CSV ({len(csv_bytes)/1024:.1f} KB)",
-                data=csv_bytes,
-                file_name=out_name,
-                mime="text/csv",
-                type="primary",
-                use_container_width=True,
+    if "1️⃣" in mode_choice:
+        c1, c2 = st.columns(2)
+        with c1:
+            curr_lat = st.number_input(
+                "Latitude (ºN / ºS - valor decimal com sinal, negativo a Sul):",
+                value=float(default_lat),
+                step=0.001,
+                format="%.6f",
+                min_value=-90.0,
+                max_value=90.0,
+                key="coord_dd_lat",
+            )
+        with c2:
+            curr_lon = st.number_input(
+                "Longitude (ºE / ºW - valor decimal com sinal, negativo a Oeste):",
+                value=float(default_lon),
+                step=0.001,
+                format="%.6f",
+                min_value=-180.0,
+                max_value=180.0,
+                key="coord_dd_lon",
             )
 
-# Rodapé com branding e "Powered by" encostado à direita
+    elif "2️⃣" in mode_choice:
+        c1, c2, c3, c4 = st.columns([3, 1, 3, 1])
+        with c1:
+            lat_abs = st.number_input("Latitude (valor absoluto):", value=float(abs(default_lat)), step=0.001, format="%.6f", min_value=0.0, max_value=90.0, key="card_lat_abs")
+        with c2:
+            lat_h = st.selectbox("Hemisfério Lat:", ["N", "S"], index=0 if default_lat >= 0 else 1, key="card_lat_h")
+        with c3:
+            lon_abs = st.number_input("Longitude (valor absoluto):", value=float(abs(default_lon)), step=0.001, format="%.6f", min_value=0.0, max_value=180.0, key="card_lon_abs")
+        with c4:
+            lon_h = st.selectbox("Hemisfério Lon:", ["W", "E"], index=0 if default_lon <= 0 else 1, key="card_lon_h")
+        curr_lat = lat_abs if lat_h == "N" else -lat_abs
+        curr_lon = lon_abs if lon_h == "E" else -lon_abs
+
+    elif "3️⃣" in mode_choice:
+        d_lat, m_lat, h_lat, _ = gc.dd_to_dmm(default_lat, True)
+        d_lon, m_lon, h_lon, _ = gc.dd_to_dmm(default_lon, False)
+        st.caption("Formato padrão dos aparelhos GPS a bordo das embarcações de investigação e rosetas CTD.")
+        c1, c2, c3 = st.columns([2, 3, 1])
+        with c1:
+            dmm_lat_deg = st.number_input("Lat Graus (º):", value=int(d_lat), min_value=0, max_value=90, step=1, key="dmm_lat_deg")
+        with c2:
+            dmm_lat_min = st.number_input("Lat Minutos Decimais ('):", value=float(m_lat), min_value=0.0, max_value=59.9999, step=0.1, format="%.4f", key="dmm_lat_min")
+        with c3:
+            dmm_lat_h = st.selectbox("Hemisfério Lat:", ["N", "S"], index=0 if h_lat == "N" else 1, key="dmm_lat_h")
+
+        c4, c5, c6 = st.columns([2, 3, 1])
+        with c4:
+            dmm_lon_deg = st.number_input("Lon Graus (º):", value=int(d_lon), min_value=0, max_value=180, step=1, key="dmm_lon_deg")
+        with c5:
+            dmm_lon_min = st.number_input("Lon Minutos Decimais ('):", value=float(m_lon), min_value=0.0, max_value=59.9999, step=0.1, format="%.4f", key="dmm_lon_min")
+        with c6:
+            dmm_lon_h = st.selectbox("Hemisfério Lon:", ["W", "E"], index=0 if h_lon == "W" else 1, key="dmm_lon_h")
+
+        curr_lat = gc.dmm_to_dd(dmm_lat_deg, dmm_lat_min, dmm_lat_h)
+        curr_lon = gc.dmm_to_dd(dmm_lon_deg, dmm_lon_min, dmm_lon_h)
+
+    elif "4️⃣" in mode_choice:
+        d_lat, m_lat, s_lat, h_lat, _ = gc.dd_to_dms(default_lat, True)
+        d_lon, m_lon, s_lon, h_lon, _ = gc.dd_to_dms(default_lon, False)
+        st.caption("Formato tradicional das cartas náuticas impressas (Graus, Minutos e Segundos).")
+        c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
+        with c1:
+            dms_lat_deg = st.number_input("Lat Graus (º):", value=int(d_lat), min_value=0, max_value=90, step=1, key="dms_lat_deg")
+        with c2:
+            dms_lat_min = st.number_input("Lat Minutos ('):", value=int(m_lat), min_value=0, max_value=59, step=1, key="dms_lat_min")
+        with c3:
+            dms_lat_sec = st.number_input('Lat Segundos ("):', value=float(s_lat), min_value=0.0, max_value=59.99, step=0.1, format="%.2f", key="dms_lat_sec")
+        with c4:
+            dms_lat_h = st.selectbox("Hemisfério Lat:", ["N", "S"], index=0 if h_lat == "N" else 1, key="dms_lat_h")
+
+        c5, c6, c7, c8 = st.columns([2, 2, 2, 1])
+        with c5:
+            dms_lon_deg = st.number_input("Lon Graus (º):", value=int(d_lon), min_value=0, max_value=180, step=1, key="dms_lon_deg")
+        with c6:
+            dms_lon_min = st.number_input("Lon Minutos ('):", value=int(m_lon), min_value=0, max_value=59, step=1, key="dms_lon_min")
+        with c7:
+            dms_lon_sec = st.number_input('Lon Segundos ("):', value=float(s_lon), min_value=0.0, max_value=59.99, step=0.1, format="%.2f", key="dms_lon_sec")
+        with c8:
+            dms_lon_h = st.selectbox("Hemisfério Lon:", ["W", "E"], index=0 if h_lon == "W" else 1, key="dms_lon_h")
+
+        curr_lat = gc.dms_to_dd(dms_lat_deg, dms_lat_min, dms_lat_sec, dms_lat_h)
+        curr_lon = gc.dms_to_dd(dms_lon_deg, dms_lon_min, dms_lon_sec, dms_lon_h)
+
+    elif "📋" in mode_choice:
+        raw_str = st.text_input(
+            "Cole aqui o texto com as coordenadas:",
+            value=f"{default_lat:.4f}, {default_lon:.4f}",
+            help="Aceita: '37.015, -7.935', '37.015 N, 7.935 W', '37° 00.900 N, 7° 56.100 W', '37° 00\\' 54\\\" N, 7° 56\\' 06\\\" W'",
+        )
+        parsed = gc.parse_coordinate_string(raw_str)
+        if parsed:
+            curr_lat, curr_lon = parsed
+            st.success(f"✓ Coordenadas identificadas com sucesso: Latitude = {curr_lat:.6f}, Longitude = {curr_lon:.6f}")
+        else:
+            st.error("Não foi possível interpretar este formato. Verifique se contém valores válidos de Latitude e Longitude.")
+
+    # Representações Finais
+    _, _, _, _, dms_lat_str = gc.dd_to_dms(curr_lat, True)
+    _, _, _, _, dms_lon_str = gc.dd_to_dms(curr_lon, False)
+    _, _, _, dmm_lat_str = gc.dd_to_dmm(curr_lat, True)
+    _, _, _, dmm_lon_str = gc.dd_to_dmm(curr_lon, False)
+    card_lat_str = gc.dd_to_cardinal(curr_lat, True)
+    card_lon_str = gc.dd_to_cardinal(curr_lon, False)
+    lon_360_val = gc.lon_to_360(curr_lon)
+
+    st.markdown("---")
+    st.markdown("#### 📊 Tabela de Conversão Multi-Formato")
+
+    r1, r2, r3 = st.columns(3)
+    with r1:
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Componentes Cardinais (N S E W)</div>
+                <div class="kpi-value" style="font-size: 1.15rem; color: #38bdf8;">{card_lat_str}<br>{card_lon_str}</div>
+                <div class="kpi-desc">Notação formal de oceanografia e navegação</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with r2:
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Graus Decimais (DD com sinal)</div>
+                <div class="kpi-value" style="font-size: 1.15rem; color: #34d399;">Lat: {curr_lat:.6f}<br>Lon: {curr_lon:.6f}</div>
+                <div class="kpi-desc">Padrão numérico Python, R, QGIS e Excel</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with r3:
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+                <div class="kpi-label">GPS Náutico / CTD (DMM)</div>
+                <div class="kpi-value" style="font-size: 1.15rem; color: #f59e0b;">{dmm_lat_str}<br>{dmm_lon_str}</div>
+                <div class="kpi-desc">Graus e minutos decimais de diário de bordo</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    r4, r5 = st.columns(2)
+    with r4:
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Cartas Náuticas (DMS)</div>
+                <div class="kpi-value" style="font-size: 1.1rem; color: #a78bfa;">{dms_lat_str}<br>{dms_lon_str}</div>
+                <div class="kpi-desc">Graus, minutos e segundos (cartografia tradicional)</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with r5:
+        st.markdown(
+            f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Longitude Grelha Global [0º a 360º]</div>
+                <div class="kpi-value" style="font-size: 1.1rem; color: #38bdf8;">Lon: {lon_360_val:.6f}º E</div>
+                <div class="kpi-desc">Grelha contínua usada em modelos CMEMS (NEMO)</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # Copernicus Marine (CMEMS)
+    st.markdown("---")
+    st.markdown("#### 🇪🇺 Utilização Direta no Copernicus Marine (CMEMS)")
+    st.info(
+        "No portal **Copernicus Marine** (MyOcean Viewer ou Subsetter), pode pesquisar dados para um **Ponto de Estação Único** "
+        "ou descarregar uma **Caixa Envolvente (*Bounding Box*)** com uma margem de segurança ao redor do ponto."
+    )
+
+    cm_c1, cm_c2 = st.columns([1, 1])
+    with cm_c1:
+        st.markdown("##### 📍 Ponto de Estação Único")
+        st.markdown(f"**Latitude:** `{curr_lat:.4f}` ({card_lat_str})  \n**Longitude:** `{curr_lon:.4f}` ({card_lon_str})")
+        st.code(f"{curr_lat:.4f}, {curr_lon:.4f}", language="text")
+
+        st.markdown("##### 🔲 Caixa Envolvente (Bounding Box)")
+        buf_deg = st.slider(
+            "Margem de segurança ao redor do ponto (º):",
+            min_value=0.0,
+            max_value=0.5,
+            value=0.1,
+            step=0.05,
+            help="0.1º corresponde a ~11 km. Permite apanhar os nós de grelha oceânica vizinhos para calcular interpolações sem apanhar terra.",
+        )
+        box_cmems = gc.get_cmems_box(curr_lat, curr_lon, buf_deg)
+
+        b1, b2 = st.columns(2)
+        with b1:
+            st.metric("Latitude Sul (Mín)", f"{box_cmems['min_lat']:.4f}º")
+            st.metric("Longitude Oeste (Mín)", f"{box_cmems['min_lon']:.4f}º")
+        with b2:
+            st.metric("Latitude Norte (Máx)", f"{box_cmems['max_lat']:.4f}º")
+            st.metric("Longitude Este (Máx)", f"{box_cmems['max_lon']:.4f}º")
+
+        if st.button("📥 Enviar estas coordenadas para o Recorte Espacial do NetCDF", use_container_width=True):
+            st.session_state["synced_cmems_box"] = box_cmems
+            st.success("✓ Coordenadas sincronizadas! Estão prontas para usar no separador 'Conversor NetCDF → CSV' (Passo 3: Recorte Espacial).")
+
+    with cm_c2:
+        st.markdown("##### 💻 Código e Comandos CMEMS Prontos a Copiar")
+        tab_cli, tab_py = st.tabs(["Linha de Comandos (CLI)", "Código Python (copernicusmarine)"])
+        with tab_cli:
+            st.code(box_cmems["cli_cmd"], language="bash")
+        with tab_py:
+            st.code(box_cmems["python_snippet"], language="python")
+
+    # Mini-Mapa Interativo
+    st.markdown("---")
+    st.markdown("#### 🗺️ Localização Geográfica no Mapa Interativo")
+
+    fig_map = go.Figure()
+
+    if buf_deg > 0:
+        box_lats = [box_cmems["min_lat"], box_cmems["max_lat"], box_cmems["max_lat"], box_cmems["min_lat"], box_cmems["min_lat"]]
+        box_lons = [box_cmems["min_lon"], box_cmems["min_lon"], box_cmems["max_lon"], box_cmems["max_lon"], box_cmems["min_lon"]]
+        fig_map.add_trace(
+            go.Scattermap(
+                lat=box_lats,
+                lon=box_lons,
+                mode="lines",
+                line=dict(width=2, color="#0ea5e9"),
+                fill="toself",
+                fillcolor="rgba(14, 165, 233, 0.15)",
+                name=f"Área CMEMS (±{buf_deg}º)",
+                hoverinfo="text",
+                text=f"Bounding Box CMEMS (±{buf_deg}º)",
+            )
+        )
+
+    fig_map.add_trace(
+        go.Scattermap(
+            lat=[curr_lat],
+            lon=[curr_lon],
+            mode="markers+text",
+            marker=dict(size=14, color="#ef4444"),
+            text=[f"Estação: {card_lat_str}, {card_lon_str}"],
+            textposition="top right",
+            name="Ponto Selecionado",
+        )
+    )
+
+    fig_map.update_layout(
+        map=dict(
+            style="open-street-map",
+            center=dict(lat=curr_lat, lon=curr_lon),
+            zoom=8 if buf_deg <= 0.2 else 6,
+        ),
+        margin=dict(l=0, r=0, t=10, b=0),
+        height=380,
+        showlegend=True,
+        template="plotly_dark",
+    )
+    st.plotly_chart(fig_map, use_container_width=True)
+
+
+# ---------------------------------------------------------
+# 7. Renderização com Separadores Principais
+# ---------------------------------------------------------
+tab_converter, tab_coords = st.tabs([
+    "🌊 Conversor NetCDF → CSV",
+    "🧭 Calculadora de Coordenadas & CMEMS",
+])
+
+with tab_converter:
+    render_netcdf_tab(preset_all)
+
+with tab_coords:
+    render_coords_tab()
+
+
+# ---------------------------------------------------------
+# 8. Rodapé com Branding e "Powered by"
+# ---------------------------------------------------------
 logo_html = ""
 if logo_base64:
     logo_html = f"""
